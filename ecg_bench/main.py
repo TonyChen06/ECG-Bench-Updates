@@ -78,7 +78,7 @@ def setup_wandb(args):
     """Initialize Weights & Biases logging if enabled"""
     print('Initializing Wandb')
     wandb.init(
-        project='ecg-bench',
+        project='EVE',
         name=f"{'_'.join(args.save_path.split('/')[2:])}",
         config=args
     )
@@ -320,7 +320,7 @@ def main(rank, world_size):
         elif args.train in ['second', 'end2end']:
             data = train_data[:400000]
         elif args.inference in ['second', 'end2end']:
-            data = test_data[:20000]
+            data = test_data[:5000]
         print('Length of Dataset:', len(data))
         
         if args.train == 'first':
@@ -350,7 +350,7 @@ def main(rank, world_size):
                 dataset,
                 batch_size=args.batch_size,
                 shuffle=(sampler is None),
-                num_workers=0,
+                num_workers=1,
                 sampler=sampler,
                 pin_memory=True,
                 collate_fn=collate_fn)
