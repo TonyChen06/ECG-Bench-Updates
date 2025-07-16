@@ -23,7 +23,7 @@ from ecg_bench.utils.optim_utils import ScheduledOptim
 from ecg_bench.utils.dir_file_utils import FileManager
 from ecg_bench.utils.viz_utils import VizUtil
 from ecg_bench.utils.ecg_tokenizer_utils import ECGByteTokenizer
-from ecg_bench.utils.data_loader_utils import FirstStageECGDataset, End2EndECGChatDataset, SecondStageECGChatDataset
+from ecg_bench.utils.data_loader_utils import FirstStageECGDataset, End2EndECGChatDataset, SecondStageECGChatDataset, EncoderFreeECGChatDataset
 from ecg_bench.utils.training_utils import TrainingUtils
 from ecg_bench.runners.train import trainer
 from ecg_bench.runners.inference import tester_chat
@@ -301,6 +301,9 @@ def main(rank, world_size):
         elif args.train == 'end2end' or args.inference == 'end2end':
             model = model_object['llm']
             tokenizer = model_object['llm_tokenizer']
+        elif args.train == 'encoder_free' or args.inference == 'encoder_free':
+            model = model_object['encoder_free']
+            tokenizer = model_object['llm_tokenizer']
         
         if args.dis:
             model = DDP(model, device_ids=[device.index], find_unused_parameters=model_object['find_unused_parameters'])
@@ -317,9 +320,9 @@ def main(rank, world_size):
         train_data, test_data = train_utils.split_dataset(json_data_file)
         if args.train == 'first':
             data = train_data[:800000]
-        elif args.train in ['second', 'end2end']:
+        elif args.train in ['second', 'end2end', 'encoder_free']:
             data = train_data[:400000]
-        elif args.inference in ['second', 'end2end']:
+        elif args.inference in ['second', 'end2end', 'encoder_free']:
             data = test_data[:5000]
         print('Length of Dataset:', len(data))
         
@@ -336,6 +339,11 @@ def main(rank, world_size):
                 encoder_tokenizer=model_object.get('encoder_tokenizer'))
         elif args.train == 'end2end' or args.inference == 'end2end':
             dataset = End2EndECGChatDataset(
+                json_data_file=data,
+                train_utils=train_utils,
+                llm_tokenizer=tokenizer)
+        elif args.train == 'encoder_free' or args.inference == 'encoder_free':
+            dataset = EncoderFreeECGChatDataset(
                 json_data_file=data,
                 train_utils=train_utils,
                 llm_tokenizer=tokenizer)

@@ -17,6 +17,7 @@ def get_args():
     data_group.add_argument('--augment_image', action = 'store_true', default=None, help='Turn Image Augmentation on')
     data_group.add_argument('--instance_normalize', action = 'store_true', default=True, help='Turn Instance Normalization on')
     data_group.add_argument('--perturb', action = 'store_true', default=None, help='Turn ECG Perturbation on')
+    data_group.add_argument('--patch_size', type=int, default=10, help='Patch size for encoder_free method')
     
     ### Model
     model_group = parser.add_argument_group('Model')
@@ -48,8 +49,8 @@ def get_args():
     
     ### Mode and Environment
     mode_group = parser.add_argument_group('Mode and Environment')
-    mode_group.add_argument('--train', type=str, default=None, choices=['first', 'second', 'end2end'], help='Training mode')
-    mode_group.add_argument('--inference', type=str, default=None, choices=['second', 'end2end'], help='Inference mode')
+    mode_group.add_argument('--train', type=str, default=None, choices=['first', 'second', 'end2end', 'encoder_free'], help='Training mode')
+    mode_group.add_argument('--inference', type=str, default=None, choices=['second', 'end2end', 'encoder_free'], help='Inference mode')
     mode_group.add_argument('--post_train', action='store_true', default=None, help='Post-training mode')
     mode_group.add_argument('--train_encoder', action='store_true', default=None, help='Train encoder too')
     mode_group.add_argument('--interpret', action='store_true', default=None, help='Interpret mode')

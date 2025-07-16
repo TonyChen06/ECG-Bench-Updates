@@ -57,6 +57,8 @@ class TrainingUtils:
             return self.get_encoder()
         elif self.args.train == 'second' or self.args.inference == 'second':
             return self.get_llm_encoder()
+        elif self.args.train == 'encoder_free' or self.args.inference == 'encoder_free':
+            return self.get_encoder_free()
     
     def get_llm_encoder(self):
         encoder_params = self.get_encoder()
@@ -170,6 +172,8 @@ class TrainingUtils:
             vocab_keys = list(self.ecg_tokenizer_utils.vocab.keys())
         elif self.args.train == 'second' or self.args.inference == 'second':
             vocab_keys = None
+        elif self.args.train == 'encoder_free' or self.args.inference == 'encoder_free':
+            vocab_keys = None
         
         llm, llm_tokenizer = self.modify_llm_tokenizer(
                 hf_llm, 
@@ -269,6 +273,31 @@ class TrainingUtils:
             'model_hidden_size': model_hidden_size,
             'strict': strict
         }
+    
+    def get_encoder_free(self):
+        llm_params = self.get_llm()
+        from ecg_bench.models.encoder_llm.encoder_free import EncoderFree
+        
+        # Get patch size from args or use default
+        patch_size = self.args.patch_size if hasattr(self.args, 'patch_size') else 10
+        
+        # Project from flattened patch (12 leads * patch_size) to LLM hidden size
+        projection_dim = 12 * patch_size  # 120 for default patch_size=10
+        
+        encoder_free = EncoderFree(
+            llm_params['llm'], 
+            projection_dim, 
+            llm_params['llm_tokenizer'],
+            patch_size=patch_size
+        ).to(self.device)
+        
+        return {
+            'encoder_free': encoder_free,
+            'llm_tokenizer': llm_params['llm_tokenizer'],
+            'find_unused_parameters': False,
+            'model_hidden_size': llm_params['model_hidden_size'],
+            'strict': True
+        }
     def calculate_patch_size(self, seq_len):
         min_patches = 16
         max_patches = 64        
@@ -309,7 +338,7 @@ class TrainingUtils:
             'additional_special_tokens': [],
             'pad_token': '<pad>' # IS PAD TOKEN DIFFERENT FOR EACH LLM?
         }
-        if self.args.train == 'second' or self.args.inference == 'second':
+        if self.args.train == 'second' or self.args.inference == 'second' or self.args.train == 'encoder_free' or self.args.inference == 'encoder_free':
             special_tokens['additional_special_tokens'].append('<signal>')
         
         ### THIS IS FOR LLAMA

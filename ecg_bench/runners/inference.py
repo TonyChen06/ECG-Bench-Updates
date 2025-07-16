@@ -24,6 +24,9 @@ def tester_chat(model, dataloader, tokenizer, args, train_utils):
                 if args.inference == 'second':
                     encoder_out = batch['encoder_out']
                     signal_id_index = batch['signal_id_index'].item()
+                elif args.inference == 'encoder_free':
+                    signal = batch['signal']
+                    signal_start_idx = batch['signal_start_idx'].item()
                 offset = 0
                 for conv_turn in assistant_ranges:
                     start = conv_turn['start'] + 4 + offset
@@ -41,6 +44,13 @@ def tester_chat(model, dataloader, tokenizer, args, train_utils):
                             tokenizer=tokenizer,
                             encoder_out=encoder_out,
                             signal_id_index=signal_id_index)
+                    elif args.inference == 'encoder_free':
+                        out = model.generate_chat(
+                            input_ids=curr_input_ids,
+                            attention_mask=curr_attention_mask,
+                            tokenizer=tokenizer,
+                            signal=signal,
+                            signal_start_idx=signal_start_idx)
                     else:
                         out = model.generate_chat(
                             input_ids=curr_input_ids,

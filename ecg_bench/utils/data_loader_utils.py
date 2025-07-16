@@ -21,7 +21,7 @@ class BaseECGDataset(Dataset):
         if llm_tokenizer is not None:
             self.create_special_tokens()
             self.signal_id = self.llm_tokenizer.convert_tokens_to_ids(['<signal>'])
-        if self.args.train == 'end2end' or self.args.inference == 'end2end' or self.args.train == 'second' or self.args.inference == 'second':
+        if self.args.train == 'end2end' or self.args.inference == 'end2end' or self.args.train == 'second' or self.args.inference == 'second' or self.args.train == 'encoder_free' or self.args.inference == 'encoder_free':
             self.system_prompt = self.train_utils.fm.get_system_prompt(self.args.system_prompt)
             self.ecg_placeholder = '<signal>'
     
@@ -535,4 +535,149 @@ class SecondStageECGChatDataset(BaseECGDataset):
             'assistant_ranges': assistant_ranges,
             'encoder_out': encoder_out,
             'signal_id_index': signal_id_index
+        }
+
+
+class EncoderFreeECGChatDataset(BaseECGDataset):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.patch_size = self.args.patch_size if hasattr(self.args, 'patch_size') else 10
+        
+    def __getitem__(self, idx):
+        try:
+            instance = self.json_data_file[idx]
+            np_path = instance['ecg_path']
+            ecg_path = self.train_utils.fm.open_npy(np_path)
+            ecg_signal = ecg_path['ecg']
+            if self.args.perturb:
+                ecg_signal = self.perturb_signal(ecg_signal)
+            altered_text = instance['text']
+            
+            return self.prepare_encoder_free_input(ecg_signal, altered_text)
+        except Exception as e:
+            print(e)
+            print(f"Skipping invalid data at index {idx}")
+            return None
+
+    def prepare_encoder_free_input(self, ecg_signal, altered_text):
+        if self.args.train == 'encoder_free' and self.args.inference is None:
+            return self.prepare_training_encoder_free(ecg_signal, altered_text)
+        if self.args.inference == 'encoder_free' and self.args.train is None:
+            return self.prepare_inference_encoder_free(ecg_signal, altered_text)
+    
+    def prepare_training_encoder_free(self, ecg_signal, altered_text):
+        # Normalize the signal - simple min-max normalization for encoder_free
+        if self.args.instance_normalize:
+            # Instance normalization: normalize each lead independently
+            normalized_signal = np.zeros_like(ecg_signal, dtype=np.float32)
+            for lead in range(ecg_signal.shape[0]):
+                lead_signal = ecg_signal[lead]
+                lead_min, lead_max = lead_signal.min(), lead_signal.max()
+                if lead_max > lead_min:
+                    normalized_signal[lead] = (lead_signal - lead_min) / (lead_max - lead_min)
+                else:
+                    normalized_signal[lead] = lead_signal
+        else:
+            # Global normalization across all leads
+            signal_min, signal_max = ecg_signal.min(), ecg_signal.max()
+            if signal_max > signal_min:
+                normalized_signal = (ecg_signal - signal_min) / (signal_max - signal_min)
+            else:
+                normalized_signal = ecg_signal.astype(np.float32)
+        
+        # Setup conversation
+        conv = self.setup_conversation_template(signal=ecg_signal)
+        altered_text = self.process_altered_text(altered_text)
+        conv = self.append_messages_to_conv(conv, altered_text, ecg_signal)
+        
+        tokens_before, tokens_after = self.get_input_tokens(conv)
+        
+        # Calculate number of signal tokens based on patch size
+        seq_len = normalized_signal.shape[1]
+        num_signal_tokens = seq_len // self.patch_size
+        
+        # Create placeholder tokens for the signal patches
+        signal_placeholder_tokens = [self.signal_id[0]] * num_signal_tokens
+        
+        # Ensure we don't exceed pad_to_max
+        max_conv_tokens = self.args.pad_to_max - num_signal_tokens
+        if len(tokens_before) + len(tokens_after) > max_conv_tokens:
+            max_after = max(max_conv_tokens // 3, 1)
+            tokens_after = tokens_after[:max_after]
+            tokens_before = tokens_before[-(max_conv_tokens - len(tokens_after)):]
+        
+        # Build input_ids with signal placeholders
+        input_ids = tokens_before + signal_placeholder_tokens + tokens_after
+        signal_start_idx = len(tokens_before)
+        
+        # Pad if necessary
+        if len(input_ids) < self.args.pad_to_max:
+            padding_length = self.args.pad_to_max - len(input_ids)
+            input_ids = [self.llm_tokenizer.pad_token_id] * padding_length + input_ids
+            signal_start_idx += padding_length
+        
+        labels = self.create_labels_from_responses(input_ids, altered_text)
+        
+        assert len(input_ids) == self.args.pad_to_max, f"Expected length {self.args.pad_to_max}, got {len(input_ids)}"
+        
+        labels = torch.tensor(labels, dtype=torch.int64)    
+        position_ids = self.create_position_ids(input_ids)
+        attention_mask = self.create_attention_mask(input_ids)
+        
+        return {
+            'input_ids': torch.tensor(input_ids, dtype=torch.int64),
+            'attn_mask': torch.tensor(attention_mask, dtype=torch.float32),
+            'labels': labels,
+            'position_ids': position_ids,
+            'signal': torch.tensor(normalized_signal, dtype=torch.float32),
+            'signal_start_idx': torch.tensor(signal_start_idx, dtype=torch.int64)
+        }
+    
+    def prepare_inference_encoder_free(self, ecg_signal, altered_text):
+        # Normalize the signal - simple min-max normalization for encoder_free
+        if self.args.instance_normalize:
+            # Instance normalization: normalize each lead independently
+            normalized_signal = np.zeros_like(ecg_signal, dtype=np.float32)
+            for lead in range(ecg_signal.shape[0]):
+                lead_signal = ecg_signal[lead]
+                lead_min, lead_max = lead_signal.min(), lead_signal.max()
+                if lead_max > lead_min:
+                    normalized_signal[lead] = (lead_signal - lead_min) / (lead_max - lead_min)
+                else:
+                    normalized_signal[lead] = lead_signal
+        else:
+            # Global normalization across all leads
+            signal_min, signal_max = ecg_signal.min(), ecg_signal.max()
+            if signal_max > signal_min:
+                normalized_signal = (ecg_signal - signal_min) / (signal_max - signal_min)
+            else:
+                normalized_signal = ecg_signal.astype(np.float32)
+        
+        # Setup conversation
+        conv = self.setup_conversation_template(signal=ecg_signal)
+        altered_text = self.process_altered_text(altered_text)
+        conv = self.append_messages_to_conv(conv, altered_text, ecg_signal)
+        
+        tokens_before, tokens_after = self.get_input_tokens(conv)
+        
+        # Calculate number of signal tokens
+        seq_len = normalized_signal.shape[1]
+        num_signal_tokens = seq_len // self.patch_size
+        
+        # Create placeholder tokens
+        signal_placeholder_tokens = [self.signal_id[0]] * num_signal_tokens
+        
+        input_ids = tokens_before + signal_placeholder_tokens + tokens_after
+        signal_start_idx = len(tokens_before)
+        attention_mask = self.create_attention_mask(input_ids)
+        
+        # Find assistant response ranges
+        assistant_ranges = self.find_assistant_ranges(input_ids)
+        
+        return {
+            'input_ids': torch.tensor(input_ids, dtype=torch.int64),
+            'attn_mask': torch.tensor(attention_mask, dtype=torch.float32),
+            'assistant_ranges': assistant_ranges,
+            'signal': torch.tensor(normalized_signal, dtype=torch.float32),
+            'signal_start_idx': torch.tensor(signal_start_idx, dtype=torch.int64)
         }
