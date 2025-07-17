@@ -541,7 +541,6 @@ class SecondStageECGChatDataset(BaseECGDataset):
 class EncoderFreeECGChatDataset(BaseECGDataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.patch_size = self.args.patch_size if hasattr(self.args, 'patch_size') else 10
         
     def __getitem__(self, idx):
         try:
@@ -566,24 +565,10 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
             return self.prepare_inference_encoder_free(ecg_signal, altered_text)
     
     def prepare_training_encoder_free(self, ecg_signal, altered_text):
-        # Normalize the signal - simple min-max normalization for encoder_free
         if self.args.instance_normalize:
-            # Instance normalization: normalize each lead independently
-            normalized_signal = np.zeros_like(ecg_signal, dtype=np.float32)
-            for lead in range(ecg_signal.shape[0]):
-                lead_signal = ecg_signal[lead]
-                lead_min, lead_max = lead_signal.min(), lead_signal.max()
-                if lead_max > lead_min:
-                    normalized_signal[lead] = (lead_signal - lead_min) / (lead_max - lead_min)
-                else:
-                    normalized_signal[lead] = lead_signal
+            normalized_signal, _, _ = self.train_utils.ecg_tokenizer_utils.instance_normalize(ecg_signal)
         else:
-            # Global normalization across all leads
-            signal_min, signal_max = ecg_signal.min(), ecg_signal.max()
-            if signal_max > signal_min:
-                normalized_signal = (ecg_signal - signal_min) / (signal_max - signal_min)
-            else:
-                normalized_signal = ecg_signal.astype(np.float32)
+            normalized_signal, _ = self.train_utils.ecg_tokenizer_utils.normalize(ecg_signal)
         
         # Setup conversation
         conv = self.setup_conversation_template(signal=ecg_signal)
@@ -592,21 +577,17 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
         
         tokens_before, tokens_after = self.get_input_tokens(conv)
         
-        # Calculate number of signal tokens based on patch size
-        seq_len = normalized_signal.shape[1]
-        num_signal_tokens = seq_len // self.patch_size
-        
-        # Create placeholder tokens for the signal patches
-        signal_placeholder_tokens = [self.signal_id[0]] * num_signal_tokens
+        # Use single signal token placeholder
+        signal_placeholder_tokens = self.signal_id
         
         # Ensure we don't exceed pad_to_max
-        max_conv_tokens = self.args.pad_to_max - num_signal_tokens
+        max_conv_tokens = self.args.pad_to_max - len(signal_placeholder_tokens)
         if len(tokens_before) + len(tokens_after) > max_conv_tokens:
             max_after = max(max_conv_tokens // 3, 1)
             tokens_after = tokens_after[:max_after]
             tokens_before = tokens_before[-(max_conv_tokens - len(tokens_after)):]
         
-        # Build input_ids with signal placeholders
+        # Build input_ids
         input_ids = tokens_before + signal_placeholder_tokens + tokens_after
         signal_start_idx = len(tokens_before)
         
@@ -634,24 +615,10 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
         }
     
     def prepare_inference_encoder_free(self, ecg_signal, altered_text):
-        # Normalize the signal - simple min-max normalization for encoder_free
         if self.args.instance_normalize:
-            # Instance normalization: normalize each lead independently
-            normalized_signal = np.zeros_like(ecg_signal, dtype=np.float32)
-            for lead in range(ecg_signal.shape[0]):
-                lead_signal = ecg_signal[lead]
-                lead_min, lead_max = lead_signal.min(), lead_signal.max()
-                if lead_max > lead_min:
-                    normalized_signal[lead] = (lead_signal - lead_min) / (lead_max - lead_min)
-                else:
-                    normalized_signal[lead] = lead_signal
+            normalized_signal, _, _ = self.train_utils.ecg_tokenizer_utils.instance_normalize(ecg_signal)
         else:
-            # Global normalization across all leads
-            signal_min, signal_max = ecg_signal.min(), ecg_signal.max()
-            if signal_max > signal_min:
-                normalized_signal = (ecg_signal - signal_min) / (signal_max - signal_min)
-            else:
-                normalized_signal = ecg_signal.astype(np.float32)
+            normalized_signal, _ = self.train_utils.ecg_tokenizer_utils.normalize(ecg_signal)
         
         # Setup conversation
         conv = self.setup_conversation_template(signal=ecg_signal)
@@ -660,12 +627,8 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
         
         tokens_before, tokens_after = self.get_input_tokens(conv)
         
-        # Calculate number of signal tokens
-        seq_len = normalized_signal.shape[1]
-        num_signal_tokens = seq_len // self.patch_size
-        
-        # Create placeholder tokens
-        signal_placeholder_tokens = [self.signal_id[0]] * num_signal_tokens
+        # Use single signal token placeholder
+        signal_placeholder_tokens = self.signal_id
         
         input_ids = tokens_before + signal_placeholder_tokens + tokens_after
         signal_start_idx = len(tokens_before)

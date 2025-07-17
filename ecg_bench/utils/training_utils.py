@@ -278,17 +278,13 @@ class TrainingUtils:
         llm_params = self.get_llm()
         from ecg_bench.models.encoder_llm.encoder_free import EncoderFree
         
-        # Get patch size from args or use default
-        patch_size = self.args.patch_size if hasattr(self.args, 'patch_size') else 10
-        
-        # Project from flattened patch (12 leads * patch_size) to LLM hidden size
-        projection_dim = 12 * patch_size  # 120 for default patch_size=10
+        # Project from flattened entire signal (12 leads * seq_len) to LLM hidden size
+        projection_dim = 12 * self.args.seg_len
         
         encoder_free = EncoderFree(
             llm_params['llm'], 
             projection_dim, 
-            llm_params['llm_tokenizer'],
-            patch_size=patch_size
+            llm_params['llm_tokenizer']
         ).to(self.device)
         
         return {

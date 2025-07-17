@@ -78,7 +78,7 @@ def setup_wandb(args):
     """Initialize Weights & Biases logging if enabled"""
     print('Initializing Wandb')
     wandb.init(
-        project='EVE',
+        project='EncoderFree',
         name=f"{'_'.join(args.save_path.split('/')[2:])}",
         config=args
     )

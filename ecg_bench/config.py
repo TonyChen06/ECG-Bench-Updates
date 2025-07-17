@@ -17,7 +17,6 @@ def get_args():
     data_group.add_argument('--augment_image', action = 'store_true', default=None, help='Turn Image Augmentation on')
     data_group.add_argument('--instance_normalize', action = 'store_true', default=True, help='Turn Instance Normalization on')
     data_group.add_argument('--perturb', action = 'store_true', default=None, help='Turn ECG Perturbation on')
-    data_group.add_argument('--patch_size', type=int, default=10, help='Patch size for encoder_free method')
     
     ### Model
     model_group = parser.add_argument_group('Model')
