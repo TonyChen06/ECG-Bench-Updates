@@ -26,7 +26,7 @@ def tester_chat(model, dataloader, tokenizer, args, train_utils):
                     signal_id_index = batch['signal_id_index'].item()
                 elif args.inference == 'encoder_free':
                     signal = batch['signal']
-                    signal_start_idx = batch['signal_start_idx'].item()
+                    signal_id_index = batch['signal_id_index'].item()
                 offset = 0
                 for conv_turn in assistant_ranges:
                     start = conv_turn['start'] + 4 + offset
@@ -50,7 +50,7 @@ def tester_chat(model, dataloader, tokenizer, args, train_utils):
                             attention_mask=curr_attention_mask,
                             tokenizer=tokenizer,
                             signal=signal,
-                            signal_start_idx=signal_start_idx)
+                            signal_id_index=signal_id_index)
                     else:
                         out = model.generate_chat(
                             input_ids=curr_input_ids,
