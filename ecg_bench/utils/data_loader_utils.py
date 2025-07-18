@@ -577,31 +577,30 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
         
         tokens_before, tokens_after = self.get_input_tokens(conv)
         
-        # Use single signal token placeholder
-        signal_placeholder_tokens = self.signal_id
-        
-        # Ensure we don't exceed pad_to_max
-        max_conv_tokens = self.args.pad_to_max - len(signal_placeholder_tokens)
-        if len(tokens_before) + len(tokens_after) > max_conv_tokens:
-            max_after = max(max_conv_tokens // 3, 1)
-            tokens_after = tokens_after[:max_after]
-            tokens_before = tokens_before[-(max_conv_tokens - len(tokens_after)):]
-        
-        # Build input_ids
-        input_ids = tokens_before + signal_placeholder_tokens + tokens_after
-        signal_start_idx = len(tokens_before)
-        
-        # Pad if necessary
-        if len(input_ids) < self.args.pad_to_max:
-            padding_length = self.args.pad_to_max - len(input_ids)
-            input_ids = [self.llm_tokenizer.pad_token_id] * padding_length + input_ids
-            signal_start_idx += padding_length
-        
+        # Build input_ids with signal token
+        input_ids = tokens_before + self.signal_id + tokens_after
         labels = self.create_labels_from_responses(input_ids, altered_text)
         
-        assert len(input_ids) == self.args.pad_to_max, f"Expected length {self.args.pad_to_max}, got {len(input_ids)}"
+        input_ids = self.pad_to_max_chat(input_ids)
+        signal_id_index = input_ids.index(self.signal_id[0])
+        labels = torch.tensor(self.pad_to_max_chat(labels), dtype=torch.int64)
+        labels[labels == self.pad_id] = -100
         
-        labels = torch.tensor(labels, dtype=torch.int64)    
+        assert len(input_ids) == self.args.pad_to_max, f"Expected length {self.args.pad_to_max}, got {len(input_ids)}"
+        assert len(input_ids) == len(labels), "Tokens and labels length mismatch"
+        
+        if self.args.dev:
+            labels_np = np.array(labels)
+            non_neg_indices = np.where(labels_np != -100)[0]
+            if len(non_neg_indices) > 0:
+                non_neg_values = labels_np[non_neg_indices].tolist()
+                tokens = self.llm_tokenizer.convert_ids_to_tokens(non_neg_values)
+                for idx, (token, token_id) in enumerate(zip(tokens, non_neg_values)):
+                    print(f"{idx}: {token} -> {token_id}")
+            else:
+                print("No valid labels found (all are -100)")
+            print('='*100)
+        
         position_ids = self.create_position_ids(input_ids)
         attention_mask = self.create_attention_mask(input_ids)
         
@@ -611,7 +610,7 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
             'labels': labels,
             'position_ids': position_ids,
             'signal': torch.tensor(normalized_signal, dtype=torch.float32),
-            'signal_start_idx': torch.tensor(signal_start_idx, dtype=torch.int64)
+            'signal_id_index': signal_id_index
         }
     
     def prepare_inference_encoder_free(self, ecg_signal, altered_text):
@@ -631,7 +630,9 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
         signal_placeholder_tokens = self.signal_id
         
         input_ids = tokens_before + signal_placeholder_tokens + tokens_after
-        signal_start_idx = len(tokens_before)
+        
+        # Find signal position
+        signal_id_index = input_ids.index(self.signal_id[0])
         attention_mask = self.create_attention_mask(input_ids)
         
         # Find assistant response ranges
@@ -642,5 +643,5 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
             'attn_mask': torch.tensor(attention_mask, dtype=torch.float32),
             'assistant_ranges': assistant_ranges,
             'signal': torch.tensor(normalized_signal, dtype=torch.float32),
-            'signal_start_idx': torch.tensor(signal_start_idx, dtype=torch.int64)
+            'signal_id_index': signal_id_index
         }
