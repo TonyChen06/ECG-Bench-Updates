@@ -12,12 +12,18 @@ class EncoderFree(nn.Module):
             projection_dim, 
             self.llm.llm.config.hidden_size
         ).to(dtype=self.llm.llm.dtype, device=self.llm.llm.device)
+        
+        # LayerNorm to match LLM's embedding distribution
+        self.layer_norm = nn.LayerNorm(
+            self.llm.llm.config.hidden_size
+        ).to(dtype=self.llm.llm.dtype, device=self.llm.llm.device)
             
     def forward(self, batch):
         # Flatten entire signal: (B, 12, seq_len) -> (B, 12*seq_len)
         # Confirmed reshaping correctly
         signal_flat = batch['signal'].reshape(batch['signal'].shape[0], -1)  # (batch_size, 12*seq_len)
         projected_embed = self.signal_projection(signal_flat.to(dtype=self.llm.llm.dtype, device=self.llm.llm.device))  # (batch_size, hidden_size)
+        projected_embed = self.layer_norm(projected_embed)  # Normalize to match LLM embedding distribution
         
         # Get LLM embeddings and replace signal token
         llm_embeddings = self.llm.get_llm_embeddings(batch['input_ids'])
@@ -35,6 +41,7 @@ class EncoderFree(nn.Module):
         # Confirmed reshaping correctly
         signal_flat = signal.reshape(signal.shape[0], -1)  # (batch_size, 12*seq_len)
         projected_embed = self.signal_projection(signal_flat.to(dtype=self.llm.llm.dtype, device=self.llm.llm.device))  # (batch_size, hidden_size)
+        projected_embed = self.layer_norm(projected_embed)  # Normalize to match LLM embedding distribution
         
         # Get LLM embeddings and replace signal token
         llm_embeddings = self.llm.get_llm_embeddings(input_ids)
