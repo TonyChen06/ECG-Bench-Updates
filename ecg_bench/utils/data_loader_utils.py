@@ -566,24 +566,11 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
             return self.prepare_inference_encoder_free(ecg_signal, altered_text)
     
     def prepare_training_encoder_free(self, ecg_signal, altered_text):
-        # Normalize the signal - simple min-max normalization for encoder_free
+        # Use same normalization as other methods
         if self.args.instance_normalize:
-            # Instance normalization: normalize each lead independently
-            normalized_signal = np.zeros_like(ecg_signal, dtype=np.float32)
-            for lead in range(ecg_signal.shape[0]):
-                lead_signal = ecg_signal[lead]
-                lead_min, lead_max = lead_signal.min(), lead_signal.max()
-                if lead_max > lead_min:
-                    normalized_signal[lead] = (lead_signal - lead_min) / (lead_max - lead_min)
-                else:
-                    normalized_signal[lead] = lead_signal
+            normalized_signal, _, _ = self.train_utils.ecg_tokenizer_utils.instance_normalize(ecg_signal)
         else:
-            # Global normalization across all leads
-            signal_min, signal_max = ecg_signal.min(), ecg_signal.max()
-            if signal_max > signal_min:
-                normalized_signal = (ecg_signal - signal_min) / (signal_max - signal_min)
-            else:
-                normalized_signal = ecg_signal.astype(np.float32)
+            normalized_signal, _ = self.train_utils.ecg_tokenizer_utils.normalize(ecg_signal)
         
         # Setup conversation
         conv = self.setup_conversation_template(signal=ecg_signal)
@@ -634,24 +621,11 @@ class EncoderFreeECGChatDataset(BaseECGDataset):
         }
     
     def prepare_inference_encoder_free(self, ecg_signal, altered_text):
-        # Normalize the signal - simple min-max normalization for encoder_free
+        # Use same normalization as other methods
         if self.args.instance_normalize:
-            # Instance normalization: normalize each lead independently
-            normalized_signal = np.zeros_like(ecg_signal, dtype=np.float32)
-            for lead in range(ecg_signal.shape[0]):
-                lead_signal = ecg_signal[lead]
-                lead_min, lead_max = lead_signal.min(), lead_signal.max()
-                if lead_max > lead_min:
-                    normalized_signal[lead] = (lead_signal - lead_min) / (lead_max - lead_min)
-                else:
-                    normalized_signal[lead] = lead_signal
+            normalized_signal, _, _ = self.train_utils.ecg_tokenizer_utils.instance_normalize(ecg_signal)
         else:
-            # Global normalization across all leads
-            signal_min, signal_max = ecg_signal.min(), ecg_signal.max()
-            if signal_max > signal_min:
-                normalized_signal = (ecg_signal - signal_min) / (signal_max - signal_min)
-            else:
-                normalized_signal = ecg_signal.astype(np.float32)
+            normalized_signal, _ = self.train_utils.ecg_tokenizer_utils.normalize(ecg_signal)
         
         # Setup conversation
         conv = self.setup_conversation_template(signal=ecg_signal)
