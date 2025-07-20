@@ -78,7 +78,7 @@ def setup_wandb(args):
     """Initialize Weights & Biases logging if enabled"""
     print('Initializing Wandb')
     wandb.init(
-        project='EVE',
+        project='Encoder_Free',
         name=f"{'_'.join(args.save_path.split('/')[2:])}",
         config=args
     )
@@ -323,7 +323,7 @@ def main(rank, world_size):
         elif args.train in ['second', 'end2end', 'encoder_free']:
             data = train_data[:400000]
         elif args.inference in ['second', 'end2end', 'encoder_free']:
-            data = test_data[:5000]
+            data = test_data[:20000]
         print('Length of Dataset:', len(data))
         
         if args.train == 'first':
