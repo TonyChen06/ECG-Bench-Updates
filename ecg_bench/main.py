@@ -78,7 +78,7 @@ def setup_wandb(args):
     """Initialize Weights & Biases logging if enabled"""
     print('Initializing Wandb')
     wandb.init(
-        project='Encoder_Free',
+        project='Encoder_Free_Paper',
         name=f"{'_'.join(args.save_path.split('/')[2:])}",
         config=args
     )
@@ -236,7 +236,7 @@ def run_post_train(model, test_loader, tokenizer, args, optimizer, judger, dpo, 
 def run_inference(model, test_loader, tokenizer, args, train_utils):
     print(f'Inferencing on {args.model} for checkpoint {args.checkpoint}')
     # seeds = [0, 1, 2, 3, 4]
-    seeds = [0, 1]
+    seeds = [0, 1, 2]
     all_seed_results = []
     
     for seed in seeds:
