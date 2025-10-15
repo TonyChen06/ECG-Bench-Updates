@@ -1,38 +1,24 @@
 #!/bin/bash
 
-models=("stmem" "merl" "mlae" "mtae" "siglip" "clip" "vit")
+models=("clip")
 
 # ### MULTI GPU
-# for model in "${models[@]}"; do
-#     python main.py \
-#     --data=ecg-qa_mimic-iv-ecg_mapped_1250 \
-#     --model=$model \
-#     --device=cuda:4 \
-#     --train=first \
-#     --batch_size=256 \
-#     --seg_len=1250 \
-#     --lr=8e-5 \
-#     --weight_decay=1e-4 \
-#     --epochs=50 \
-#     --instance_normalize \
-#     --attn_implementation=flash_attention_2 \
-#     --log
-# done
-
-
-models=("vit" "clip" "siglip" )
-
 for model in "${models[@]}"; do
     python main.py \
-    --data=test-ecg \
+    --data=ecg-qa-mimic-iv-ecg-250-1250 \
     --model=$model \
-    --device=cuda:6 \
+    --device=cuda:4 \
+    --dis \
+    --gpus=4,5,6,7 \
     --train=first \
-    --batch_size=64 \
+    --batch_size=512 \
+    --ref_global_bs=512 \
     --seg_len=1250 \
-    --epochs=50 \
-    --instance_normalize \
-    --attn_implementation=flash_attention_2 \
+    --lr=8e-5 \
+    --weight_decay=1e-4 \
+    --epochs=100 \
     --image \
-    --dev
+    --instance_normalize
 done
+
+

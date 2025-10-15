@@ -99,6 +99,7 @@ def create_save_path(args, fm):
         model_params = [
             args.model,
             args.optimizer,
+            args.ref_global_bs,
             args.batch_size,
             args.epochs,
             args.pad_to_max,
@@ -243,7 +244,7 @@ def run_post_train(model, test_loader, tokenizer, args, optimizer, judger, dpo, 
 def run_inference(model, test_loader, tokenizer, args, train_utils):
     print(f'Inferencing on {args.model} for checkpoint {args.checkpoint}')
     # seeds = [0, 1, 2, 3, 4]
-    seeds = [0, 1]
+    seeds = [0, 1, 2]
     all_seed_results = []
     
     for seed in seeds:
@@ -252,7 +253,12 @@ def run_inference(model, test_loader, tokenizer, args, train_utils):
         random.seed(seed)
         np.random.seed(seed)
         
-        checkpoint = torch.load(f"{args.checkpoint}/best_model.pth", map_location=args.device)
+        ###HEREHERHEHWERHE
+        ###HEREHERHEHWERHE
+        ###HEREHERHEHWERHE
+        ###HEREHERHEHWERHE
+
+        checkpoint = torch.load(f"{args.checkpoint}/model_0_99999.pth", map_location=args.device)
         model.load_state_dict(checkpoint['model'])
         print('Model loaded')
         
@@ -375,7 +381,7 @@ def main(rank, world_size):
                 dataset,
                 batch_size=args.batch_size,
                 shuffle=(sampler is None),
-                num_workers=0,
+                num_workers=1,
                 sampler=sampler,
                 pin_memory=True,
                 collate_fn=collate_fn)

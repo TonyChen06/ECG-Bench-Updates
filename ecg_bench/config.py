@@ -71,7 +71,7 @@ def get_args():
     dist_group = parser.add_argument_group('Distributed Training')
     dist_group.add_argument('--dis', action='store_true', default=None, help='Enable distributed training')
     dist_group.add_argument('--gpus', type=str, default='0', help='Comma-separated GPU ids')
-    dist_group.add_argument('--ports', type=str, default='12356', help='Comma-separated ports')
+    dist_group.add_argument('--ports', type=str, default='12359', help='Comma-separated ports')
     
     ### Checkpoints
     ckpt_group = parser.add_argument_group('Checkpoints')
