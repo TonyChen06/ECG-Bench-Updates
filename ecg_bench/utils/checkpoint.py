@@ -16,8 +16,10 @@ class CheckpointManager:
     def save_checkpoint(self, model, optimizer, epoch, step, is_best=False, prefix=""):
         if not is_main():
             return
-        filename = f"{prefix}epoch_{epoch}_step_{step}.pt"
-        filepath = os.path.join(self.checkpoint_dir, filename)
+
+        # Only save if it's the best model
+        if not is_best:
+            return
 
         # Handle DDP-wrapped models
         if self.args.distributed:
@@ -31,10 +33,10 @@ class CheckpointManager:
             "model_state_dict": model_state_dict,
             "optimizer_state_dict": optimizer.optimizer.state_dict(),
         }
-        torch.save(checkpoint, filepath)
-        if is_best:
-            best_path = os.path.join(self.checkpoint_dir, f"{prefix}best.pt")
-            torch.save(checkpoint, best_path)
+
+        # Only save best.pt (overwrites previous best)
+        best_path = os.path.join(self.checkpoint_dir, f"{prefix}best.pt")
+        torch.save(checkpoint, best_path)
 
     def save_epoch(self, loss):
         if loss < self.best_loss:
@@ -45,10 +47,8 @@ class CheckpointManager:
         return False
 
     def save_step(self, step, total_steps_per_epoch):
-        if step == 0:
-            return True
-        save_interval = max(1, total_steps_per_epoch // 5)
-        return step % save_interval == 0
+        # Disabled: don't save checkpoints during steps
+        return False
 
     def stop_early(self):
         if len(self.epoch_losses) < self.args.patience + 1:

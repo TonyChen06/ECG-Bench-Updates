@@ -1,0 +1,8 @@
+dev: null
+ecg_tokenizer: null
+num_cores: 24
+num_merges: 3500
+num_samples: 800000
+path_to_ecg_npy: null
+sampled_file: ./ecg_bench/configs/ecg_tokenizers/sampled_800000_random.txt
+seed: 0

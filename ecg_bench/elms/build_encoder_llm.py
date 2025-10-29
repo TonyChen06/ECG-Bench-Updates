@@ -31,6 +31,12 @@ class BuildEncoderLLM:
             encoder_llm_components = self.build_fuyu()
         else:
             encoder_llm_components = self.build_llava()
+
+        # When updating encoder, we need find_unused_parameters=True
+        # because not all encoder parameters receive gradients in every iteration
+        if self.args.update_encoder:
+            encoder_llm_components["find_unused_parameters"] = True
+
         return merge_dicts(
             self.encoder_components,
             self.llm_components,

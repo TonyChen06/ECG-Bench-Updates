@@ -49,6 +49,16 @@ class BuildDataLoader:
                 pin_memory=True,
                 collate_fn=self.collate_fn,
             )
+        elif self.mode == "val":
+            torch_data_loader = DataLoader(
+                self.torch_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=False,
+                num_workers=2 if self.args.encoder and not self.args.llm else 0,
+                sampler=self.sampler,
+                pin_memory=True,
+                collate_fn=self.collate_fn,
+            )
         elif self.mode in ["inference", "eval"]:
             torch_data_loader = DataLoader(
                 self.torch_dataset,
@@ -62,8 +72,10 @@ class BuildDataLoader:
     def get_torch_dataloader_sampler(
         self,
     ):
-        if self.args.distributed:
+        if self.args.distributed and self.mode == "train":
             self.sampler = DistributedSampler(self.torch_dataset, num_replicas=get_world_size(), rank=get_rank(), seed=self.args.seed, shuffle=True)
+        elif self.args.distributed and self.mode == "val":
+            self.sampler = DistributedSampler(self.torch_dataset, num_replicas=get_world_size(), rank=get_rank(), shuffle=False)
         else:
             self.sampler = None
 
@@ -112,11 +124,15 @@ class BuildDataLoader:
         self,
     ):
         if self.mode in ["train", "post_train"]:
-            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_train", cache_dir=HF_CACHE_DIR).with_transform(
+            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_train[:1500000]", cache_dir=HF_CACHE_DIR).with_transform(
                 self.decode_batch
             )
+        elif self.mode == "val":
+            data = load_dataset(
+                f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_train[1500000:1600000]", cache_dir=HF_CACHE_DIR
+            ).with_transform(self.decode_batch)
         elif self.mode in ["eval", "inference"]:
-            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_test", cache_dir=HF_CACHE_DIR).with_transform(
+            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_test[:20000]", cache_dir=HF_CACHE_DIR).with_transform(
                 self.decode_batch
             )
         if is_main():

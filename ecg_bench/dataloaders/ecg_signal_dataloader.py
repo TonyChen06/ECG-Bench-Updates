@@ -47,7 +47,7 @@ class ECGSignalDataset(BaseECGDataset):
         else:
             prompt = None
 
-        if self.mode == "train":
+        if self.mode in ["train", "val"]:
             return self.prepare_training_set(prompt, encoder_tokenizer_out)
         elif self.mode in ["eval", "inference"]:
             return self.prepare_eval_inference_set(prompt, encoder_tokenizer_out)

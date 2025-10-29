@@ -6,7 +6,7 @@ from ecg_bench.utils.gpu_setup import init_dist, cleanup, GPUSetup, is_main
 from ecg_bench.utils.set_seed import set_seed
 from ecg_bench.dataloaders.build_dataloader import BuildDataLoader
 from ecg_bench.elms.build_encoder import BuildEncoder
-from ecg_bench.runners.encoder_trainer import train
+from ecg_bench.runners.encoder_trainer import train, validate
 from ecg_bench.utils.file_manager import setup_experiment_folders
 from ecg_bench.configs.constants import RUNS_DIR
 from ecg_bench.optimizers.scheduler import get_optimizer
@@ -38,6 +38,9 @@ def main():
     build_dataloader = BuildDataLoader(mode, args)
     dataloader = build_dataloader.build_dataloader()
 
+    build_val_dataloader = BuildDataLoader("val", args)
+    val_dataloader = build_val_dataloader.build_dataloader()
+
     build_encoder = BuildEncoder(args)
     encoder_components = build_encoder.build_encoder()
 
@@ -51,10 +54,12 @@ def main():
 
     for epoch in range(args.epochs):
         train_result = train(encoder, dataloader, optimizer, epoch, args, checkpoint_manager)
-        if args.wandb and is_main():
-            wandb.log({"train/epoch_loss": train_result["average_loss"], "epoch": epoch})
+        val_result = validate(encoder, val_dataloader, epoch, args)
 
-        if checkpoint_manager.save_epoch(train_result["average_loss"]):
+        if args.wandb and is_main():
+            wandb.log({"train/epoch_loss": train_result["average_loss"], "val/epoch_loss": val_result["average_loss"], "epoch": epoch})
+
+        if checkpoint_manager.save_epoch(val_result["average_loss"]):
             checkpoint_manager.save_checkpoint(encoder, optimizer, epoch, -1, is_best=True, prefix="epoch_")
         if checkpoint_manager.stop_early():
             if is_main():

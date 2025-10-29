@@ -18,8 +18,12 @@ def main():
     args = get_args(mode)
     # folds = ["1", "2", "3", "4", "5"]
     # seeds = [1337, 1338, 1339, 1340, 1341]
-    folds = ["1", "2"]
-    seeds = [1337, 1338]
+    folds = [
+        "1",
+        "2",
+        "3",
+    ]
+    seeds = [0, 1, 2]
     all_metrics = []
     for fold, seed in zip(folds, seeds):
         print(f"Evaluating fold {fold} with seed {seed}")
