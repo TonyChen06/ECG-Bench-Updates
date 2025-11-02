@@ -1,6 +1,6 @@
 #!/bin/bash
 
-models=("clip")
+models=("merl")
 
 # ### MULTI GPU
 for model in "${models[@]}"; do
@@ -9,15 +9,15 @@ for model in "${models[@]}"; do
     --model=$model \
     --device=cuda:4 \
     --dis \
-    --gpus=4,5,6,7 \
+    --gpus=6,7 \
     --train=first \
-    --batch_size=512 \
-    --ref_global_bs=512 \
+    --batch_size=256 \
+    --ref_global_bs=1024 \
     --seg_len=1250 \
     --lr=8e-5 \
     --weight_decay=1e-4 \
-    --epochs=100 \
-    --image \
+    --epochs=50 \
+    --log \
     --instance_normalize
 done
 

@@ -381,7 +381,7 @@ def main(rank, world_size):
                 dataset,
                 batch_size=args.batch_size,
                 shuffle=(sampler is None),
-                num_workers=1,
+                num_workers=2,
                 sampler=sampler,
                 pin_memory=True,
                 collate_fn=collate_fn)

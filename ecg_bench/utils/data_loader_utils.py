@@ -120,8 +120,9 @@ class BaseECGDataset(Dataset):
         return conv
         
     def process_altered_text(self, altered_text):
-        if self.args.data not in [f'ecg-instruct-45k-{self.args.target_sf}-{self.args.seg_len}', 
+        if self.args.data not in [f'ecg-instruct-45k-{self.args.target_sf}-{self.args.seg_len}',
                                   f'ecg-instruct-pulse-{self.args.target_sf}-{self.args.seg_len}',
+                                  f'ecg-bench-pulse-{self.args.target_sf}-{self.args.seg_len}',
                                   f'ecg-bench-pulse-mapped-{self.args.target_sf}-{self.args.seg_len}']:
             question, answer = self.get_qa(altered_text)
             if 'gemma' in self.args.model:
