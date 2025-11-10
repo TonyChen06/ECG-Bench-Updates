@@ -6,6 +6,7 @@ def get_args():
     ### Data
     data_group = parser.add_argument_group('Data')
     data_group.add_argument('--data', type=str, default=None, help='Dataset name')
+    data_group.add_argument('--fold', type=str, default="1", help='Data fold number')
     data_group.add_argument('--seg_len', type=int, default=None, help='Segment length')
     data_group.add_argument('--num_merges', type=int, default=3500, help='Vocab size')
     data_group.add_argument('--target_sf', type=int, default=250, help='Target sampling frequency')
@@ -27,6 +28,7 @@ def get_args():
     
     ### Optimizer
     optim_group = parser.add_argument_group('Optimizer')
+    optim_group.add_argument('--optimizer', type=str, default='adam', choices=['adam', 'adamw'], help='Optimizer type')
     optim_group.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     optim_group.add_argument('--batch_size', type=int, default=128, help='Batch size')
     optim_group.add_argument('--epochs', type=int, default=150, help='Number of epochs')
@@ -39,6 +41,9 @@ def get_args():
     optim_group.add_argument('--delta', type=float, default=0.1, help='Delta for early stopping')
     optim_group.add_argument('--attn_implementation', type=str, default=None, help='Attention implementation')
     optim_group.add_argument('--dpo_beta', type=float, default=0.5, help='DPO beta')
+    optim_group.add_argument('--ref_global_bs', type=int, default=None)
+    optim_group.add_argument('--grad_accum_steps', type=int, default=1)
+    optim_group.add_argument('--scale_wd', type=str, default='none', choices=['none','inv_sqrt','inv_linear'])
     
     ### PEFT
     peft_group = parser.add_argument_group('PEFT')

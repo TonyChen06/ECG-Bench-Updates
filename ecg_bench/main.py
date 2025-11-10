@@ -2,11 +2,10 @@ import torch
 torch.set_num_threads(6)
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim import Adam
 import torch.multiprocessing as mp
 import os
 import argparse
-from huggingface_hub import login
+from huggingface_hub import HfFolder, login
 import gc
 import random
 import numpy as np
@@ -17,6 +16,7 @@ import json
 import yaml
 import copy
 import llm_blender
+from datasets import load_dataset
 
 from ecg_bench.config import get_args
 from ecg_bench.utils.optim_utils import ScheduledOptim
@@ -53,10 +53,14 @@ def cleanup():
 
 def initialize_system(args):
     print('Loading API key')
-    with open('./../.huggingface/api_keys.txt', 'r') as file:
-        api_key = file.readlines()[0].strip()
-    login(token=api_key)
-    
+    if HfFolder.get_token() is None:                 # not logged in on this machine
+        print("Loading API key and logging in …")
+        with open('./../.huggingface/api_keys.txt', "r") as f:
+            api_key = f.readline().strip()
+        login(token=api_key)                         # caches token in ~/.huggingface/token
+    else:
+        print("Hugging Face token already present skipping login.")
+
     print('System Cleanup')
     gc.collect()
     torch.cuda.empty_cache()
@@ -307,24 +311,30 @@ def main(rank, world_size):
         
         if args.dis:
             model = DDP(model, device_ids=[device.index], find_unused_parameters=model_object['find_unused_parameters'])
-        
+
         print(f'Total number of parameters: {train_utils.count_parameters(model)}')
-        
-        optimizer = ScheduledOptim(
-            Adam(filter(lambda x: x.requires_grad, model.parameters()),
-                 betas=(args.beta1, args.beta2), eps=args.eps, lr=args.lr, weight_decay=args.weight_decay),
-            model_object['model_hidden_size'], args)
-        
-        json_data_file = fm.open_json(f'./data/{args.data}.json')
-        
-        train_data, test_data = train_utils.split_dataset(json_data_file)
+
+        if args.train:
+            optimizer_class = train_utils.get_optimizer_class(args.optimizer)
+            optimizer = ScheduledOptim(
+                optimizer_class(filter(lambda x: x.requires_grad, model.parameters()),
+                    betas=(args.beta1, args.beta2), eps=args.eps, lr=args.lr, weight_decay=args.weight_decay),
+                model_object['model_hidden_size'], args)
+
+        if args.train:
+            train_data = load_dataset(f"willxxy/{args.data}", split=f"fold{args.fold}_train").with_transform(fm.decode_batch)
+            print(f"Length of Train Data: {len(train_data)}")
+        elif args.inference:
+            test_data = load_dataset(f"willxxy/{args.data}", split=f"fold{args.fold}_test").with_transform(fm.decode_batch)
+            print(f"Length of Test Data: {len(test_data)}")
+
         if args.train == 'first':
-            data = train_data[:800000]
+            data = train_data.select(range(800000))
         elif args.train in ['second', 'end2end', 'encoder_free']:
-            data = train_data[:400000]
+            data = train_data.select(range(400000))
         elif args.inference in ['second', 'end2end', 'encoder_free']:
-            data = test_data[:20000]
-        print('Length of Dataset:', len(data))
+            data = test_data.select(range(20000))
+        print('Length of Dataset Considered:', len(data))
         
         if args.train == 'first':
             dataset = FirstStageECGDataset(
