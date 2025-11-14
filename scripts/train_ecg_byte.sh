@@ -1,14 +1,14 @@
 # Sample ECG files
 python -m ecg_bench.train_ecg_byte \
     --path_to_ecg_npy=./ecg_bench/data/mimic/preprocessed_2500_250 \
-    --num_samples=800000
+    --num_samples=300000
 
 # # Train ECG Byte Tokenizer from sampled files
 python -m ecg_bench.train_ecg_byte \
-    --sampled_file=./ecg_bench/configs/ecg_tokenizers/sampled_800000_random.txt \
-    --num_merges=6000 \
-    --num_cores=12 \
-    --num_samples=800000
+    --sampled_file=./ecg_bench/configs/ecg_tokenizers/sampled_300000_random.txt \
+    --num_merges=5000 \
+    --num_cores=24 \
+    --num_samples=300000
 
 # # Load ECG Byte Tokenizer
 python -m ecg_bench.train_ecg_byte \

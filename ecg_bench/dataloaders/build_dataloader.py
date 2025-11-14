@@ -127,11 +127,12 @@ class BuildDataLoader:
         self,
     ):
         if self.mode in ["train", "post_train"]:
-            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_train", cache_dir=HF_CACHE_DIR).with_transform(
+            train_limit = 63062 if self.args.data == "ecg-instruct-45k-250-1250" else 800000
+            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_train[:{train_limit}]", cache_dir=HF_CACHE_DIR).with_transform(
                 self.decode_batch
             )
         elif self.mode in ["eval", "inference"]:
-            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_test", cache_dir=HF_CACHE_DIR).with_transform(
+            data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_test[:20000]", cache_dir=HF_CACHE_DIR).with_transform(
                 self.decode_batch
             )
         if is_main():
