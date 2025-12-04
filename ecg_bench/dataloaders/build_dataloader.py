@@ -44,7 +44,7 @@ class BuildDataLoader:
                 self.torch_dataset,
                 batch_size=self.args.batch_size,
                 shuffle=(self.sampler is None),
-                num_workers=2 if self.args.encoder and not self.args.llm else 0,
+                num_workers=2 if self.args.encoder and not self.args.llm else 1,
                 sampler=self.sampler,
                 pin_memory=True,
                 collate_fn=self.collate_fn,
@@ -83,7 +83,7 @@ class BuildDataLoader:
                 "truncated_padded_ecg_tokens": torch.tensor([], dtype=torch.int64),
             }
 
-        if self.args.encoder == "signal2vec":
+        if self.args.encoder == "signal2vec" or self.args.ecg_token:
             pad_id = -2
             pad_fields = ["truncated_padded_ecg_tokens", "signal_id_indices"]
             for field in pad_fields:
@@ -127,7 +127,7 @@ class BuildDataLoader:
         self,
     ):
         if self.mode in ["train", "post_train"]:
-            train_limit = 63062 if self.args.data == "ecg-instruct-45k-250-1250" else 800000
+            train_limit = 63062 if self.args.data == "ecg-instruct-45k-250-1250" else 400000
             data = load_dataset(f"willxxy/{self.args.data}", split=f"fold{self.args.fold}_train[:{train_limit}]", cache_dir=HF_CACHE_DIR).with_transform(
                 self.decode_batch
             )

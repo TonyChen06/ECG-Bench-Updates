@@ -45,10 +45,15 @@ class CheckpointManager:
         return False
 
     def save_step(self, step, total_steps_per_epoch):
-        if step == 0:
-            return True
-        save_interval = max(1, total_steps_per_epoch // 5)
-        return step % save_interval == 0
+        # save 5 times per epoch (cuz we need steps ablation study)
+        if self.args.data == "ecg-qa-ptbxl-250-1250":
+            if step == 0:
+                return True
+            save_interval = max(1, total_steps_per_epoch // 5)
+            return step % save_interval == 0
+
+        # for all other datasets don't save intermediate steps
+        return False
 
     def stop_early(self):
         if len(self.epoch_losses) < self.args.patience + 1:

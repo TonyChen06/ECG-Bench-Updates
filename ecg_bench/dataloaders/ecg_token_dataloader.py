@@ -125,8 +125,10 @@ class ECGTokenDataset(BaseECGDataset):
             return before + ecg_tokens + after, self.convert_ecg_tokens(ecg_tokens)
 
     def find_ecg_token_indices(self, input_ids: list[int]) -> list[int]:
+        if self.args.encoder != "signal2vec":
+            return [-1]
         ecg_token_indices = [i for i, tid in enumerate(input_ids) if tid in self.ecg_token_ids]
-        if not ecg_token_indices or self.args.encoder != "signal2vec":
+        if not ecg_token_indices:
             if self.args.dev and is_main():
                 print("No ECG tokens found in input_ids.")
             return [-1]
