@@ -3,17 +3,31 @@ import torch
 
 
 class LLaVA(nn.Module):
-    def __init__(self, llm: nn.Module, encoder: nn.Module, projection: nn.Module, update_encoder: bool = False, no_signal: bool = False):
+    def __init__(self, llm: nn.Module, encoder: nn.Module, projection: nn.Module, update_encoder: bool = False, no_signal: bool = False, freeze_llm: bool = False, freeze_projection: bool = False):
         super(LLaVA, self).__init__()
         self.llm = llm
         self.encoder = encoder
         self.projection = projection
         self.update_encoder = update_encoder
+        self.freeze_llm = freeze_llm
+        self.freeze_projection = freeze_projection
         self._set_encoder_trainable(self.update_encoder)
+        if self.freeze_llm:
+            self._set_llm_trainable(False)
+        if self.freeze_projection:
+            self._set_projection_trainable(False)
         self.no_signal = no_signal
 
     def _set_encoder_trainable(self, trainable: bool) -> None:
         for p in self.encoder.parameters():
+            p.requires_grad = trainable
+
+    def _set_llm_trainable(self, trainable: bool) -> None:
+        for p in self.llm.parameters():
+            p.requires_grad = trainable
+
+    def _set_projection_trainable(self, trainable: bool) -> None:
+        for p in self.projection.parameters():
             p.requires_grad = trainable
 
     def forward(self, batch):

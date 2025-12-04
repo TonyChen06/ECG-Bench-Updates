@@ -3,11 +3,25 @@ import torch
 
 
 class Fuyu(nn.Module):
-    def __init__(self, llm: nn.Module, encoder: nn.Module, no_signal: bool = False):
+    def __init__(self, llm: nn.Module, encoder: nn.Module, no_signal: bool = False, freeze_llm: bool = False, freeze_projection: bool = False):
         super(Fuyu, self).__init__()
         self.encoder = encoder
         self.llm = llm
         self.no_signal = no_signal
+        self.freeze_llm = freeze_llm
+        self.freeze_projection = freeze_projection
+        if self.freeze_llm:
+            self._set_llm_trainable(False)
+        if self.freeze_projection:
+            self._set_projection_trainable(False)
+
+    def _set_llm_trainable(self, trainable: bool) -> None:
+        for p in self.llm.parameters():
+            p.requires_grad = trainable
+
+    def _set_projection_trainable(self, trainable: bool) -> None:
+        for p in self.encoder.parameters():
+            p.requires_grad = trainable
 
     def forward(self, batch):
         projected_embeds = self.get_projections(batch)
