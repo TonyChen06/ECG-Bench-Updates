@@ -88,9 +88,16 @@ class BuildLLM:
     def get_lora_configs(
         self,
     ):
+        # Target modules for models not yet recognized by PEFT (e.g., Qwen3)
+        target_modules = None
+        if "qwen3" in self.args.llm:
+            target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
         lora_config = LoraConfig(
             r=self.args.lora_rank,
             lora_alpha=self.args.lora_alpha,
             task_type=TaskType.CAUSAL_LM,
+            target_modules=target_modules,
+            modules_to_save=["embed_tokens", "lm_head"],
         )
         return lora_config

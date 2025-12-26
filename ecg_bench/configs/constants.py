@@ -3,7 +3,7 @@ import torch
 import re
 
 # Main arg MODE types
-Mode = Literal["train", "eval", "inference", "post_train", "ecg_tokenizer", "preprocess", "rag", "signal2vec"]
+Mode = Literal["train", "eval", "inference", "post_train", "ecg_tokenizer", "preprocess", "rag", "signal2vec", "pretrain"]
 
 # Directories
 RUNS_DIR = "./ecg_bench/runs"
@@ -154,6 +154,31 @@ HF_LLMS = {
             },
         },
     },
+    "qwen3-4b-instruct": {
+        "model": "Qwen/Qwen3-4B-Instruct-2507",
+        "tokenizer": "Qwen/Qwen3-4B-Instruct-2507",
+        "chat_template": "qwen-7b-chat",
+        "native_dtype": torch.bfloat16,
+        "tokens_to_add": {
+            "additional_special_tokens": [],
+        },
+        "find_unused_parameters": False,
+        "model_hidden_size": None,
+        "output_hidden_states": False,
+        "system_prompt": True,
+        "role": "assistant",
+        "watch_tokens": {
+            "bos_token": {151644: "<|im_start|>"},
+            "eos_token": {151645: "<|im_end|>"},
+            "response_start": {
+                "order": [151645, 198, 151644, 77091, 198],
+                151645: "<|im_end|>",
+                198: "Ċ",
+                151644: "<|im_start|>",
+                77091: "assistant",
+            },
+        },
+    },
     "gemma-2-2b-it": {
         "model": "google/gemma-2-2b-it",
         "tokenizer": "google/gemma-2-2b-it",
@@ -237,6 +262,15 @@ VISION_ENCODERS_INPUT_MAPPING = {
 ## Token ID
 SIGNAL_TOKEN_PLACEHOLDER = "<signal>"
 ECG_TOKEN_PREFIX = "signal_"
+
+# ECG Raw Token Configuration
+# 600 tokens representing values from -3 to 3 mV (equally spaced bins)
+ECG_RAW_TOKEN_PREFIX = "ecg_"
+ECG_RAW_NUM_BINS = 600
+ECG_RAW_MIN_VALUE = -3.0  # mV
+ECG_RAW_MAX_VALUE = 3.0   # mV
+ECG_RAW_LEADS = ["II", "aVR", "V1", "V4"]  # Lead indices: 1, 5, 6, 9 (0-indexed)
+ECG_RAW_LEAD_INDICES = [1, 5, 6, 9]  # Standard 12-lead order: I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6
 
 # Encoders
 ECG_ENCODERS = {

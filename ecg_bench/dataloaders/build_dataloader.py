@@ -114,6 +114,10 @@ class BuildDataLoader:
             from ecg_bench.dataloaders.ecg_signal_dataloader import ECGSignalDataset
 
             torch_dataset = ECGSignalDataset(self.data, self.mode, self.llm_tokenizer_components, self.encoder_tokenizer_components, self.args)
+        elif self.args.ecg_raw:
+            from ecg_bench.dataloaders.ecg_raw_dataloader import ECGRawDataset
+
+            torch_dataset = ECGRawDataset(self.data, self.mode, self.llm_tokenizer_components, self.args)
         elif self.args.ecg_stacked_signal:
             from ecg_bench.dataloaders.ecg_stacked_signal_dataloader import ECGStackedSignalDataset
 
@@ -141,6 +145,9 @@ class BuildDataLoader:
         if self.args.data_subset is not None and 0 < self.args.data_subset < 1:
             n = int(len(data) * self.args.data_subset)
             data = data.shuffle(seed=self.args.seed).select(range(n))
+
+        if self.mode == "train":
+            data = data.select(range(min(len(data), 400000)))
 
         if is_main():
             print("Length of Dataset Considered:", len(data))
@@ -219,6 +226,8 @@ class BuildDataLoader:
     def assert_data_model_match(self):
         if self.args.ecg_token:
             assert self.args.encoder is None or self.args.encoder == "signal2vec", print("ecg_token mode should not specify encoder")
+        elif self.args.ecg_raw:
+            assert self.args.encoder is None, print("ecg_raw mode should not specify encoder")
         elif self.args.ecg_image or self.args.ecg_stacked_signal:
             assert self.args.encoder in VISION_ENCODERS, print(f"ecg_image/ecg_stacked_signal requires vision encoder, got {self.args.encoder}")
         elif self.args.ecg_signal:
