@@ -1,5 +1,6 @@
 #!/bin/bash
 # Generate pretraining data for ECG token understanding
+# Task 6 uses real ECG data from MIMIC QA train set
 
 python -m ecg_bench.pretraining.generate_dataset \
     --output_dir ./ecg_bench/data/pretraining \
@@ -11,5 +12,6 @@ python -m ecg_bench.pretraining.generate_dataset \
     --task4_duration 1.0 \
     --task5_duration 2.0 \
     --task5_chunk_size 100 \
-    --task6_duration 2.0 \
-    --task6_chunk_size 100
+    --task6_chunk_size 100 \
+    --mimic_dataset ecg-qa-mimic-iv-ecg-250-1250 \
+    --mimic_fold 1

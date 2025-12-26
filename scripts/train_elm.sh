@@ -1,37 +1,27 @@
-# single GPU (works as you had it)
 datasets=(
-  # ecg-qa-mimic-iv-ecg-250-1250
   ecg-qa-ptbxl-250-1250
-  # pretrain-mimic-250-1250
-  ecg-instruct-45k-250-1250
+  #ecg-qa-mimic-iv-ecg-250-1250
+  #ecg-instruct-45k-250-1250
+  #pretrain-mimic-250-1250
   # ecg-bench-pulse-250-1250
   # ecg-instruct-pulse-250-1250
 )
 for data in "${datasets[@]}"
 do
-  python -m ecg_bench.train_elm \
+  CUDA_VISIBLE_DEVICES=5,6 \
+  CUBLAS_WORKSPACE_CONFIG=:4096:8 \
+  torchrun --standalone --nproc_per_node=2 --master_port=10067 \
+  -m ecg_bench.train_elm \
     --ecg_signal \
-    --llm=llama-3.2-1b-instruct \
+    --llm=qwen3-4b-instruct \
     --data="$data" \
-    --device=cuda:1 \
+    --distributed \
     --peft \
     --encoder=projection \
     --batch_size=2 \
     --attention_type=flash_attention_2 \
     --system_prompt=./ecg_bench/configs/system_prompt/system_prompt.txt \
-    --dev
+    --wandb
     echo "Finished training on $data"
     echo "-----------------------------------"
 done
-
-# python -m ecg_bench.train_elm \
-# --ecg_signal \
-# --batch_size=2 \
-# --llm=llama-3.2-1b-instruct \
-# --encoder=siglip-base-patch16-224 \
-# --data=ecg-instruct-45k-250-1250 \
-# --device=cuda:1 \
-# --peft \
-# --attention_type=flash_attention_2 \
-# --system_prompt=./ecg_bench/configs/system_prompt/system_prompt.txt \
-# --dev

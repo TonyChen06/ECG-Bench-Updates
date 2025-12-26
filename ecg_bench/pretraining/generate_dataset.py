@@ -24,6 +24,7 @@ from ecg_bench.pretraining.task_generators import (
     generate_task_0, generate_task_1, generate_task_2,
     generate_task_3, generate_task_4, generate_task_5,
     generate_task_6, task_to_conversation, Task,
+    init_ecg_loader,
 )
 
 
@@ -52,8 +53,12 @@ def parse_args():
     parser.add_argument("--task4_duration", type=float, default=1.0, help="Duration for Task 4 (seconds)")
     parser.add_argument("--task5_duration", type=float, default=2.0, help="Duration for Task 5 (seconds)")
     parser.add_argument("--task5_chunk_size", type=int, default=100, help="Chunk size for Task 5")
-    parser.add_argument("--task6_duration", type=float, default=2.0, help="Duration for Task 6 (seconds)")
     parser.add_argument("--task6_chunk_size", type=int, default=100, help="Chunk size for Task 6")
+
+    # MIMIC dataset parameters for Task 6
+    parser.add_argument("--mimic_dataset", type=str, default="ecg-qa-mimic-iv-ecg-250-1250",
+                       help="MIMIC dataset to use for Task 6 ECG data")
+    parser.add_argument("--mimic_fold", type=str, default="1", help="Fold to use from MIMIC dataset")
 
     return parser.parse_args()
 
@@ -66,7 +71,6 @@ def generate_task_by_type(
     task4_duration: float = 1.0,
     task5_duration: float = 2.0,
     task5_chunk_size: int = 100,
-    task6_duration: float = 2.0,
     task6_chunk_size: int = 100,
 ) -> Task:
     """Generate a task of the specified type."""
@@ -83,7 +87,7 @@ def generate_task_by_type(
     elif task_type == 5:
         return generate_task_5(duration=task5_duration, chunk_size=task5_chunk_size)
     elif task_type == 6:
-        return generate_task_6(duration=task6_duration, chunk_size=task6_chunk_size)
+        return generate_task_6(chunk_size=task6_chunk_size)
     else:
         raise ValueError(f"Unknown task type: {task_type}")
 
@@ -113,15 +117,14 @@ def generate_dataset(
         **task_params: Parameters passed to task generators
     """
     if task_weights is None:
-        # Default weights - slightly favor simpler tasks
         task_weights = {
-            0: 2.0,  # Token comparison (simple, good for warmup)
-            1: 1.5,  # Values to tokens
-            2: 1.5,  # Tokens to values
-            3: 2.0,  # Wave classification (important)
-            4: 1.5,  # Wave transformation
-            5: 1.0,  # Wave reconstruction (complex)
-            6: 0.5,  # ECG reconstruction (complex, fewer needed)
+            0: 2.0,  # Token comparison (more of these for basic understanding)
+            1: 1.0,  # Values to tokens
+            2: 1.0,  # Tokens to values
+            3: 1.0,  # Wave classification
+            4: 1.0,  # Wave transformation
+            5: 1.0,  # Wave reconstruction
+            6: 1.0,  # ECG reconstruction
         }
 
     dataset = []
@@ -224,6 +227,10 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
 
+    # Initialize ECG loader for Task 6 (uses real MIMIC data)
+    print(f"Initializing ECG loader with dataset: {args.mimic_dataset} (fold {args.mimic_fold})...")
+    init_ecg_loader(dataset_name=args.mimic_dataset, fold=args.mimic_fold)
+
     # Parse task weights if provided
     task_weights = None
     if args.task_weights:
@@ -238,7 +245,6 @@ def main():
         "task4_duration": args.task4_duration,
         "task5_duration": args.task5_duration,
         "task5_chunk_size": args.task5_chunk_size,
-        "task6_duration": args.task6_duration,
         "task6_chunk_size": args.task6_chunk_size,
     }
 

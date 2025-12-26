@@ -8,7 +8,7 @@ Generates various tasks to help the model understand ECG tokens:
 - Task 3: Wave classification and property extraction (multi-turn)
 - Task 4: Wave transformation (frequency/amplitude changes)
 - Task 5: Wave reconstruction from specification (chunked)
-- Task 6: ECG reconstruction from diagnosis
+- Task 6: ECG reconstruction from real MIMIC data
 """
 
 import numpy as np
@@ -26,6 +26,11 @@ from ecg_bench.pretraining.tokenization import (
     format_value, format_values_list, tokens_to_string, string_to_tokens,
     compare_magnitudes, get_halfway_token, get_next_token, value_to_bin,
 )
+from ecg_bench.configs.constants import ECG_RAW_LEAD_INDICES, ECG_RAW_LEADS
+
+
+# Global ECG loader (initialized lazily)
+_ecg_loader = None
 
 
 @dataclass
@@ -271,15 +276,15 @@ def generate_wave_classification_task(duration: float = 2.0) -> Task:
         WaveType.SAWTOOTH, WaveType.SQUARE, WaveType.PULSE,
     ])
 
+    # Cap amplitude at 3.0 to stay within [-3, 3] mV range without clamping
     params = random_wave_params(
         wave_type=wave_type,
-        amplitude_range=(0.8, 2.0),
+        amplitude_range=(0.8, 3.0),
         frequency_range=(1.0, 5.0),
         allow_offset=False,  # Keep it simpler for classification
     )
 
     _, wave = generate_wave(duration, params)
-    wave = clamp_wave(wave)
     tokens = values_to_tokens(wave)
     tokens_str = tokens_to_string(tokens)
 
@@ -331,10 +336,10 @@ def generate_frequency_transformation_task(duration: float = 1.0) -> Task:
     """
     Generate a task: given a wave, show what it looks like with different frequency.
     """
-    # Generate original wave
+    # Generate original wave with amplitude capped at 3.0 to avoid clamping
     wave_type = random.choice([WaveType.SINE, WaveType.TRIANGLE, WaveType.SAWTOOTH])
     original_freq = np.random.uniform(1.0, 3.0)
-    amplitude = np.random.uniform(1.0, 2.0)
+    amplitude = np.random.uniform(1.0, 3.0)
 
     params = WaveParams(
         wave_type=wave_type,
@@ -345,10 +350,9 @@ def generate_frequency_transformation_task(duration: float = 1.0) -> Task:
     )
 
     _, original_wave = generate_wave(duration, params)
-    original_wave = clamp_wave(original_wave)
     original_tokens = values_to_tokens(original_wave)
 
-    # Transform frequency
+    # Transform frequency (amplitude stays the same, so no clamping needed)
     freq_multiplier = random.choice([2.0, 0.5, 3.0])
     new_freq = original_freq * freq_multiplier
 
@@ -361,7 +365,6 @@ def generate_frequency_transformation_task(duration: float = 1.0) -> Task:
     )
 
     _, new_wave = generate_wave(duration, new_params)
-    new_wave = clamp_wave(new_wave)
     new_tokens = values_to_tokens(new_wave)
 
     original_str = tokens_to_string(original_tokens)
@@ -388,10 +391,23 @@ def generate_frequency_transformation_task(duration: float = 1.0) -> Task:
 def generate_amplitude_transformation_task(duration: float = 1.0) -> Task:
     """
     Generate a task: given a wave, show what it looks like with different amplitude.
+    Ensures both original and transformed waves stay within [-3, 3] mV without clamping.
     """
     wave_type = random.choice([WaveType.SINE, WaveType.TRIANGLE, WaveType.SQUARE])
     frequency = np.random.uniform(1.0, 4.0)
-    original_amp = np.random.uniform(0.8, 1.5)
+
+    # Pick multiplier first, then constrain original amplitude so result stays <= 3.0
+    amp_multiplier = random.choice([2.0, 0.5, 1.5])
+
+    if amp_multiplier > 1.0:
+        # If multiplying up, original must be small enough that result <= 3.0
+        max_original = 3.0 / amp_multiplier
+        original_amp = np.random.uniform(0.5, max_original)
+    else:
+        # If multiplying down, original can be up to 3.0
+        original_amp = np.random.uniform(1.0, 3.0)
+
+    new_amp = original_amp * amp_multiplier
 
     params = WaveParams(
         wave_type=wave_type,
@@ -402,12 +418,7 @@ def generate_amplitude_transformation_task(duration: float = 1.0) -> Task:
     )
 
     _, original_wave = generate_wave(duration, params)
-    original_wave = clamp_wave(original_wave)
     original_tokens = values_to_tokens(original_wave)
-
-    # Transform amplitude
-    amp_multiplier = random.choice([2.0, 0.5, 1.5])
-    new_amp = min(original_amp * amp_multiplier, 2.9)  # Keep within bounds
 
     new_params = WaveParams(
         wave_type=wave_type,
@@ -418,7 +429,6 @@ def generate_amplitude_transformation_task(duration: float = 1.0) -> Task:
     )
 
     _, new_wave = generate_wave(duration, new_params)
-    new_wave = clamp_wave(new_wave)
     new_tokens = values_to_tokens(new_wave)
 
     original_str = tokens_to_string(original_tokens)
@@ -467,7 +477,8 @@ def generate_wave_reconstruction_task(
         WaveType.SAWTOOTH, WaveType.SQUARE,
     ])
 
-    amplitude = round(np.random.uniform(0.8, 2.0), 2)
+    # Cap amplitude at 3.0 to stay within [-3, 3] mV range without clamping
+    amplitude = round(np.random.uniform(0.8, 3.0), 2)
     frequency = round(np.random.uniform(1.0, 4.0), 2)
 
     params = WaveParams(
@@ -479,7 +490,6 @@ def generate_wave_reconstruction_task(
     )
 
     _, wave = generate_wave(duration, params)
-    wave = clamp_wave(wave)
     total_samples = len(wave)
 
     turns = []
@@ -525,147 +535,102 @@ def generate_task_5(duration: float = 2.0, chunk_size: int = 100) -> Task:
 
 
 # =============================================================================
-# Task 6: ECG Reconstruction from Diagnosis
+# Task 6: ECG Reconstruction from Real MIMIC Data
 # =============================================================================
 
-# Common ECG diagnoses and their rough characteristics
-ECG_DIAGNOSES = {
-    "normal_sinus_rhythm": {
-        "description": "Normal sinus rhythm",
-        "heart_rate_range": (60, 100),
-        "characteristics": "regular rhythm with normal P-QRS-T morphology",
-    },
-    "sinus_bradycardia": {
-        "description": "Sinus bradycardia",
-        "heart_rate_range": (40, 60),
-        "characteristics": "regular rhythm with slow heart rate",
-    },
-    "sinus_tachycardia": {
-        "description": "Sinus tachycardia",
-        "heart_rate_range": (100, 150),
-        "characteristics": "regular rhythm with fast heart rate",
-    },
-    "atrial_fibrillation": {
-        "description": "Atrial fibrillation",
-        "heart_rate_range": (60, 150),
-        "characteristics": "irregularly irregular rhythm with absent P waves",
-    },
-    "first_degree_av_block": {
-        "description": "First degree AV block",
-        "heart_rate_range": (50, 90),
-        "characteristics": "prolonged PR interval with regular rhythm",
-    },
-}
-
-
-def generate_synthetic_ecg_beat(heart_rate: float, beat_idx: int) -> np.ndarray:
+def init_ecg_loader(dataset_name: str = "ecg-qa-mimic-iv-ecg-250-1250", fold: str = "1"):
     """
-    Generate a synthetic ECG beat (simplified PQRST complex).
-    This is a rough approximation for pretraining purposes.
+    Initialize the global ECG loader for Task 6.
+
+    Must be called before generating Task 6 examples.
     """
-    # Samples per beat
-    rr_interval = 60.0 / heart_rate  # seconds
-    samples_per_beat = int(rr_interval * SAMPLING_RATE)
-
-    t = np.linspace(0, rr_interval, samples_per_beat)
-    beat = np.zeros(samples_per_beat)
-
-    # P wave (small bump)
-    p_center = 0.1 * rr_interval
-    p_width = 0.03 * rr_interval
-    beat += 0.15 * np.exp(-((t - p_center) ** 2) / (2 * p_width ** 2))
-
-    # QRS complex
-    qrs_center = 0.2 * rr_interval
-
-    # Q wave (small negative)
-    q_center = qrs_center - 0.015
-    beat -= 0.1 * np.exp(-((t - q_center) ** 2) / (2 * 0.005 ** 2))
-
-    # R wave (large positive)
-    r_center = qrs_center
-    beat += 1.5 * np.exp(-((t - r_center) ** 2) / (2 * 0.008 ** 2))
-
-    # S wave (small negative)
-    s_center = qrs_center + 0.015
-    beat -= 0.2 * np.exp(-((t - s_center) ** 2) / (2 * 0.005 ** 2))
-
-    # T wave (medium positive)
-    t_center = 0.4 * rr_interval
-    t_width = 0.05 * rr_interval
-    beat += 0.3 * np.exp(-((t - t_center) ** 2) / (2 * t_width ** 2))
-
-    return beat
+    global _ecg_loader
+    from ecg_bench.pretraining.ecg_loader import PretrainECGLoader
+    _ecg_loader = PretrainECGLoader(dataset_name=dataset_name, fold=fold)
+    return _ecg_loader
 
 
-def generate_synthetic_ecg(diagnosis: str, duration: float = 2.0) -> Tuple[np.ndarray, Dict[str, Any]]:
+def get_ecg_loader():
+    """Get the global ECG loader, raising an error if not initialized."""
+    global _ecg_loader
+    if _ecg_loader is None:
+        raise RuntimeError(
+            "ECG loader not initialized. Call init_ecg_loader() before generating Task 6 examples."
+        )
+    return _ecg_loader
+
+
+def extract_lead_signal(ecg_signal: np.ndarray, lead_idx: int) -> np.ndarray:
     """
-    Generate a synthetic ECG signal based on diagnosis.
+    Extract a single lead from the ECG signal.
+
+    Args:
+        ecg_signal: ECG signal array of shape (num_leads, num_samples) or (num_samples, num_leads)
+        lead_idx: Index of the lead to extract (0-11 for 12-lead ECG)
+
+    Returns:
+        1D array of the lead signal
     """
-    diag_info = ECG_DIAGNOSES.get(diagnosis, ECG_DIAGNOSES["normal_sinus_rhythm"])
-    hr_range = diag_info["heart_rate_range"]
-    heart_rate = np.random.uniform(*hr_range)
-
-    samples_needed = int(duration * SAMPLING_RATE)
-    ecg = np.zeros(samples_needed)
-
-    # Generate beats
-    beat_idx = 0
-    current_sample = 0
-
-    while current_sample < samples_needed:
-        # Add some variability for AF
-        if diagnosis == "atrial_fibrillation":
-            hr_variation = heart_rate * np.random.uniform(0.7, 1.3)
+    # Handle different shapes
+    if ecg_signal.shape[0] == 12:  # leads first: (12, num_samples)
+        return ecg_signal[lead_idx, :]
+    elif ecg_signal.shape[1] == 12:  # samples first: (num_samples, 12)
+        return ecg_signal[:, lead_idx]
+    else:
+        # Try to infer the shape
+        if ecg_signal.shape[0] < ecg_signal.shape[1]:
+            return ecg_signal[lead_idx, :]
         else:
-            hr_variation = heart_rate * np.random.uniform(0.95, 1.05)
-
-        beat = generate_synthetic_ecg_beat(hr_variation, beat_idx)
-
-        # Handle AF: remove P waves
-        if diagnosis == "atrial_fibrillation":
-            # Add baseline noise instead of P wave
-            beat[:int(len(beat) * 0.15)] = np.random.uniform(-0.05, 0.05, int(len(beat) * 0.15))
-
-        # Add beat to ECG
-        end_sample = min(current_sample + len(beat), samples_needed)
-        samples_to_add = end_sample - current_sample
-        ecg[current_sample:end_sample] = beat[:samples_to_add]
-
-        current_sample = end_sample
-        beat_idx += 1
-
-    # Add baseline wander and noise
-    t = np.linspace(0, duration, samples_needed)
-    baseline_wander = 0.05 * np.sin(2 * np.pi * 0.1 * t)
-    noise = np.random.normal(0, 0.02, samples_needed)
-    ecg = ecg + baseline_wander + noise
-
-    return ecg, {
-        "diagnosis": diagnosis,
-        "description": diag_info["description"],
-        "heart_rate": heart_rate,
-        "characteristics": diag_info["characteristics"],
-    }
+            return ecg_signal[:, lead_idx]
 
 
-def generate_ecg_reconstruction_task(
-    duration: float = 2.0,
+def generate_real_ecg_reconstruction_task(
     chunk_size: int = 100,
+    max_samples: int = 500,  # Limit samples to keep task reasonable (500 samples = 2 seconds at 250 Hz)
 ) -> Task:
     """
-    Generate a task where the model reconstructs an ECG from diagnosis.
-    Similar to Task 5 but with ECG-specific content.
+    Generate a task where the model outputs ECG tokens from real MIMIC data.
+
+    Uses one of the 4 leads (II, aVR, V1, V4) from a real ECG recording.
+    Includes the diagnostic report in the prompt.
     """
-    diagnosis = random.choice(list(ECG_DIAGNOSES.keys()))
-    ecg, info = generate_synthetic_ecg(diagnosis, duration)
-    ecg = clamp_wave(ecg)
-    total_samples = len(ecg)
+    loader = get_ecg_loader()
+
+    # Try to get a valid ECG with a non-empty report
+    max_attempts = 20
+    for _ in range(max_attempts):
+        ecg_signal, metadata = loader.get_random_ecg()
+        if ecg_signal is not None and metadata.get("report", "").strip():
+            break
+    else:
+        raise RuntimeError("Failed to load ECG with diagnosis after multiple attempts")
+
+    # Get the diagnosis report
+    report = metadata.get("report", "").strip()
+
+    # Select a random lead from our 4 leads
+    lead_idx_in_list = random.randint(0, len(ECG_RAW_LEAD_INDICES) - 1)
+    lead_idx = ECG_RAW_LEAD_INDICES[lead_idx_in_list]
+    lead_name = ECG_RAW_LEADS[lead_idx_in_list]
+
+    # Extract the lead signal
+    lead_signal = extract_lead_signal(ecg_signal, lead_idx)
+
+    # Limit the number of samples
+    if len(lead_signal) > max_samples:
+        # Take a random segment
+        start = random.randint(0, len(lead_signal) - max_samples)
+        lead_signal = lead_signal[start:start + max_samples]
+
+    # Clamp to [-3, 3] mV range
+    lead_signal = clamp_wave(lead_signal)
+    total_samples = len(lead_signal)
+    duration = total_samples / SAMPLING_RATE
 
     turns = []
 
-    # Initial prompt with diagnosis
-    prompt = f"Generate a synthetic ECG signal showing {info['description']} with heart rate approximately {int(info['heart_rate'])} bpm. The signal should show {info['characteristics']}. Sample at 250 Hz for {duration} seconds. Output timeseries tokens in chunks. Start with tokens 1-{chunk_size}."
+    # Initial prompt - includes diagnosis and asks for ECG tokens
+    prompt = f"Generate the {lead_name} lead ECG signal for a patient with the following diagnosis: {report}\n\nOutput the timeseries tokens sampled at 250 Hz for {format_value(duration)} seconds. Output in chunks. Start with tokens 1-{min(chunk_size, total_samples)}."
 
     turns.append(ConversationTurn("human", prompt))
 
@@ -675,7 +640,7 @@ def generate_ecg_reconstruction_task(
     for i in range(num_chunks):
         start_idx = i * chunk_size
         end_idx = min((i + 1) * chunk_size, total_samples)
-        chunk_tokens = values_to_tokens(ecg[start_idx:end_idx])
+        chunk_tokens = values_to_tokens(lead_signal[start_idx:end_idx])
         chunk_str = tokens_to_string(chunk_tokens)
 
         turns.append(ConversationTurn("assistant", f"{chunk_str}"))
@@ -689,9 +654,11 @@ def generate_ecg_reconstruction_task(
         task_type="ecg_reconstruction",
         turns=turns,
         metadata={
-            "diagnosis": diagnosis,
-            "description": info["description"],
-            "heart_rate": info["heart_rate"],
+            "source": "mimic-iv-ecg",
+            "ecg_path": metadata.get("ecg_path", ""),
+            "report": report,
+            "lead": lead_name,
+            "lead_idx": lead_idx,
             "duration": duration,
             "chunk_size": chunk_size,
             "total_samples": total_samples,
@@ -700,9 +667,9 @@ def generate_ecg_reconstruction_task(
     )
 
 
-def generate_task_6(duration: float = 2.0, chunk_size: int = 100) -> Task:
-    """Generate Task 6 (ECG reconstruction from diagnosis)."""
-    return generate_ecg_reconstruction_task(duration, chunk_size)
+def generate_task_6(chunk_size: int = 100) -> Task:
+    """Generate Task 6 (ECG reconstruction from real MIMIC data)."""
+    return generate_real_ecg_reconstruction_task(chunk_size=chunk_size)
 
 
 # =============================================================================
@@ -735,7 +702,7 @@ def generate_random_task(
         3: lambda: generate_task_3(duration=2.0),
         4: lambda: generate_task_4(duration=1.0),
         5: lambda: generate_task_5(duration=2.0, chunk_size=100),
-        6: lambda: generate_task_6(duration=2.0, chunk_size=100),
+        6: lambda: generate_task_6(chunk_size=100),
     }
 
     return generators[task_type]()
