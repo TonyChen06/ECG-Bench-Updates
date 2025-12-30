@@ -33,8 +33,8 @@ def get_args(mode: Mode) -> argparse.Namespace:
         parser.add_argument("--encoder", type=str, default=None, help="Neural Network Encoder Model")
         parser.add_argument("--llm", type=str, default=None, help="Large Language Model")
         parser.add_argument("--peft", action="store_true", default=None, help="Use PEFT")
-        parser.add_argument("--lora_rank", type=int, default=16, help="LoRA rank")
-        parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha")
+        parser.add_argument("--lora_rank", type=int, default=32, help="LoRA rank")
+        parser.add_argument("--lora_alpha", type=int, default=64, help="LoRA alpha")
         parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
         parser.add_argument("--encoder_ckpt", type=str, default=None, help="Path to the encoder checkpoint")
         parser.add_argument("--elm_ckpt", type=str, default=None, help="Path to the LLM checkpoint")
@@ -42,6 +42,7 @@ def get_args(mode: Mode) -> argparse.Namespace:
         parser.add_argument("--num_encoder_tokens", type=int, default=1, help="Number of encoder tokens")
         parser.add_argument("--update_encoder", action="store_true", default=False, help="Update encoder")
         parser.add_argument("--output_hidden_states", action="store_true", default=False, help="Output hidden states")
+        parser.add_argument("--max_new_tokens", type=int, default=512, help="Max new tokens for generation")
         parser.add_argument("--plat_rep_type", type=str, default="separate", choices=["separate", "combined"], help="Platonic Representation Type")
 
         parser.add_argument("--system_prompt", type=str, default=None, help="Path to System Prompt")
@@ -71,6 +72,7 @@ def get_args(mode: Mode) -> argparse.Namespace:
         parser.add_argument("--beta2", type=float, default=0.99, help="Beta2 for optimizer")
         parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon for optimizer")
         parser.add_argument("--warmup", type=int, default=500, help="Warmup steps")
+        parser.add_argument("--embed_skip_warmup", action="store_true", default=False, help="Skip warmup for embedding layers (use peak LR from start)")
         parser.add_argument("--ref_global_bs", type=int, default=None)
         parser.add_argument("--grad_accum_steps", type=int, default=1)
         parser.add_argument("--scale_wd", type=str, default="none", choices=["none", "inv_sqrt", "inv_linear"])
@@ -117,12 +119,13 @@ def get_args(mode: Mode) -> argparse.Namespace:
         # LLM and training arguments
         parser.add_argument("--llm", type=str, required=True, help="Large Language Model")
         parser.add_argument("--peft", action="store_true", default=None, help="Use PEFT")
-        parser.add_argument("--lora_rank", type=int, default=16, help="LoRA rank")
-        parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha")
+        parser.add_argument("--lora_rank", type=int, default=32, help="LoRA rank")
+        parser.add_argument("--lora_alpha", type=int, default=64, help="LoRA alpha")
         parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
         parser.add_argument("--elm_ckpt", type=str, default=None, help="Path to the LLM checkpoint")
         parser.add_argument("--attention_type", type=str, default="sdpa", help="Attention Type")
         parser.add_argument("--output_hidden_states", action="store_true", default=False, help="Output hidden states")
+        parser.add_argument("--max_new_tokens", type=int, default=512, help="Max new tokens for generation")
         parser.add_argument("--system_prompt", type=str, default=None, help="Path to System Prompt")
 
         # Pretraining data
@@ -140,6 +143,7 @@ def get_args(mode: Mode) -> argparse.Namespace:
         parser.add_argument("--beta2", type=float, default=0.99, help="Beta2 for optimizer")
         parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon for optimizer")
         parser.add_argument("--warmup", type=int, default=500, help="Warmup steps")
+        parser.add_argument("--embed_skip_warmup", action="store_true", default=False, help="Skip warmup for embedding layers (use peak LR from start)")
         parser.add_argument("--ref_global_bs", type=int, default=None)
         parser.add_argument("--grad_accum_steps", type=int, default=1)
         parser.add_argument("--scale_wd", type=str, default="none", choices=["none", "inv_sqrt", "inv_linear"])
@@ -149,5 +153,23 @@ def get_args(mode: Mode) -> argparse.Namespace:
         parser.add_argument("--device", type=str, default=None, help="Device (cuda/cpu)")
         parser.add_argument("--distributed", action="store_true", default=None, help="Enable distributed training")
         parser.add_argument("--wandb", action="store_true", default=None, help="Enable logging")
+
+        # Scheduled sampling parameters (horizon-based curriculum)
+        parser.add_argument("--ss_horizon_start", type=int, default=1, help="Starting prediction horizon (1=next token prediction)")
+        parser.add_argument("--ss_horizon_end", type=int, default=10, help="Ending prediction horizon (e.g., 10=predict 10 tokens ahead)")
+
+        # Gradient clipping
+        parser.add_argument("--max_grad_norm", type=float, default=0, help="Max gradient norm for clipping (0 to disable)")
+
+        # Curriculum learning - preserve task order during training
+        parser.add_argument("--curriculum", action="store_true", default=True, help="Preserve curriculum order (no shuffling)")
+        parser.add_argument("--no_curriculum", action="store_true", help="Disable curriculum (enable shuffling)")
+
+        # Stage-based training (for detachable stages)
+        parser.add_argument("--stage", type=int, default=None, help="Train only on a specific stage (1-9). If not set, trains on all stages.")
+        parser.add_argument("--resume_from", type=str, default=None, help="Path to checkpoint directory to resume from (loads model and tokenizer)")
+
+        # ECG embedding warmup: Stage 1 only trains new ECG token embeddings
+        parser.add_argument("--no_ecg_warmup", action="store_true", default=False, help="Skip ECG-embedding-only warmup (train full model from start)")
 
     return parser.parse_args()

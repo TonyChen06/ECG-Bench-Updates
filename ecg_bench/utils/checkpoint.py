@@ -13,7 +13,7 @@ class CheckpointManager:
         if is_main():
             os.makedirs(self.checkpoint_dir, exist_ok=True)
 
-    def save_checkpoint(self, model, optimizer, epoch, step, is_best=False, prefix=""):
+    def save_checkpoint(self, model, optimizer, epoch, step, is_best=False, prefix="", global_step=None):
         if not is_main():
             return
         filename = f"{prefix}epoch_{epoch}_step_{step}.pt"
@@ -28,6 +28,7 @@ class CheckpointManager:
         checkpoint = {
             "epoch": epoch,
             "step": step,
+            "global_step": global_step if global_step is not None else getattr(optimizer, "n_current_steps", 0),
             "model_state_dict": model_state_dict,
             "optimizer_state_dict": optimizer.optimizer.state_dict(),
         }
@@ -45,10 +46,8 @@ class CheckpointManager:
         return False
 
     def save_step(self, step, total_steps_per_epoch):
-        if step == 0:
-            return True
-        save_interval = max(1, total_steps_per_epoch // 5)
-        return step % save_interval == 0
+        # Disabled to save storage - only save best epoch checkpoint
+        return False
 
     def stop_early(self):
         if len(self.epoch_losses) < self.args.patience + 1:

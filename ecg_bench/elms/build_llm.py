@@ -21,7 +21,8 @@ class BuildLLM:
             llm = self.build_hf()
         else:
             raise ValueError(f"{self.args.llm} not supported.")
-        llm = HuggingFaceLLM(llm, self.pad_token_id, self.eos_token_id, self.args.output_hidden_states)
+        max_new_tokens = getattr(self.args, "max_new_tokens", 512)
+        llm = HuggingFaceLLM(llm, self.pad_token_id, self.eos_token_id, self.args.output_hidden_states, max_new_tokens)
         if self.args.dev and is_main():
             self.print_llm_dtype(llm)
         key_name = "llm" if self.args.encoder is not None else "elm"

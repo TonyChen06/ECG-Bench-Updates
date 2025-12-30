@@ -100,13 +100,24 @@ def format_values_list(values: np.ndarray, precision: int = 2) -> str:
 
 
 def tokens_to_string(tokens: List[str]) -> str:
-    """Convert list of tokens to space-separated string."""
-    return " ".join(tokens)
+    """Convert list of tokens to concatenated string (no spaces)."""
+    return "".join(tokens)
 
 
 def string_to_tokens(token_string: str) -> List[str]:
-    """Convert space-separated token string to list."""
-    return token_string.strip().split()
+    """Convert concatenated token string to list.
+
+    Handles both formats:
+    - Concatenated: "ecg_300ecg_301ecg_302"
+    - Space-separated: "ecg_300 ecg_301 ecg_302"
+    """
+    token_string = token_string.strip()
+    if " " in token_string:
+        return token_string.split()
+    # Parse concatenated format: split on 'ecg_' and reconstruct
+    import re
+    matches = re.findall(r'ecg_\d+', token_string)
+    return matches if matches else []
 
 
 def get_bin_range() -> Tuple[int, int]:

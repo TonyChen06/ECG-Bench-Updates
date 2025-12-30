@@ -27,6 +27,7 @@ class PretrainDataset(Dataset):
     Dataset for pretraining tasks.
 
     Loads tasks from JSONL files and formats them for the LLM.
+    Supports scheduled sampling for Tasks 5 and 6.
     """
 
     def __init__(
@@ -41,30 +42,56 @@ class PretrainDataset(Dataset):
         self.args = args
         self.llm_tokenizer = llm_tokenizer_components["llm_tokenizer"]
 
-        # Load data
+        # Load data (with optional stage filtering)
         self.data = self._load_data()
 
         # Add ECG tokens to vocabulary
         self._add_ecg_tokens()
+
+        # Build ECG token ID set for scheduled sampling
+        self._build_ecg_token_set()
 
         # Set up chat template
         if self.args.llm:
             self.chat_template = self._make_chat_template()
 
     def _load_data(self) -> List[Dict]:
-        """Load data from JSONL file."""
+        """Load data from JSONL file, optionally filtering by stage/phase.
+
+        When --stage N is specified, only samples with phase == N are loaded.
+        This includes:
+        - Main samples for task N
+        - Review samples from earlier tasks that were generated during phase N
+
+        The 'phase' field is added during dataset generation to mark which
+        training phase each sample belongs to.
+        """
         data = []
         file_path = self.data_path / f"{self.mode.replace('eval', 'test')}.jsonl"
 
         if not file_path.exists():
             raise FileNotFoundError(f"Data file not found: {file_path}")
 
+        target_stage = getattr(self.args, "stage", None)
+
         with open(file_path, "r") as f:
             for line in f:
-                data.append(json.loads(line.strip()))
+                sample = json.loads(line.strip())
+
+                if target_stage is not None:
+                    # Filter by phase (not task_id) to get exactly the samples
+                    # that would be shown during that training phase
+                    sample_phase = sample.get("phase", sample.get("task_id", -1))
+                    if sample_phase == target_stage:
+                        data.append(sample)
+                else:
+                    data.append(sample)
 
         if is_main():
-            print(f"Loaded {len(data)} samples from {file_path}")
+            if target_stage is not None:
+                print(f"Loaded {len(data)} samples for stage {target_stage}")
+            else:
+                print(f"Loaded {len(data)} samples from {file_path}")
 
         return data
 
@@ -74,6 +101,11 @@ class PretrainDataset(Dataset):
         if self.args.dev and is_main():
             print(f"Adding {len(new_vocab)} ECG raw tokens to vocabulary")
         self.llm_tokenizer.add_tokens(new_vocab)
+
+    def _build_ecg_token_set(self):
+        """Build set of ECG token IDs for scheduled sampling."""
+        ecg_tokens = [f"{ECG_RAW_TOKEN_PREFIX}{i}" for i in range(ECG_RAW_NUM_BINS)]
+        self.ecg_token_ids = set(self.llm_tokenizer.convert_tokens_to_ids(ecg_tokens))
 
     def _make_chat_template(self):
         """Create chat template for the LLM."""
@@ -87,9 +119,52 @@ class PretrainDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
+    # Mapping of task_type strings to numeric IDs for batching/logging
+    # Stage structure (1-9):
+    #   Stage 1: values_to_tokens (outputs ECG tokens for embedding training)
+    #   Stage 2: magnitude_comparison + value_comparison (simple comparison)
+    #   Stage 3: sequence_next + halfway_token (arithmetic)
+    #   Stage 4-9: wave tasks, ECG tasks
+    #
+    # Sub-type IDs use format: stage * 10 + sub_index (e.g., 20, 21 for stage 2 sub-types)
+    TASK_TYPE_TO_ID = {
+        # Stage 1 sub-types
+        "values_to_tokens": 10,
+        "tokens_to_values": 11,
+        # Stage 2 sub-types (simple comparison - no arithmetic)
+        "magnitude_comparison": 20,
+        "value_comparison": 21,
+        # Stage 3 sub-types (arithmetic on token indices)
+        "sequence_next": 30,
+        "halfway_token": 31,
+        # Stage 4+
+        "wave_classification": 40,
+        "frequency_transformation": 50,
+        "amplitude_transformation": 51,
+        "wave_generation": 60,
+        "wave_reconstruction": 60,  # Legacy alias
+        "ecg_generation": 70,
+        "ecg_reconstruction": 70,  # Legacy alias
+        "long_range_wave_prediction": 80,
+        "wave_prediction": 80,  # Legacy alias
+        "long_range_ecg_prediction": 90,
+        "ecg_prediction": 90,  # Legacy alias
+    }
+
     def __getitem__(self, index):
         instance = self.data[index]
         text = instance["text"]
+        metadata = instance.get("metadata", {})
+
+        # Get task ID for curriculum tracking (default -1 if not present)
+        task_id = instance.get("task_id", -1)
+
+        # Get task_type for sub-task tracking (useful for Task 2 debugging)
+        task_type_str = instance.get("task_type", metadata.get("task_type", "unknown"))
+        task_type_id = self.TASK_TYPE_TO_ID.get(task_type_str, -1)
+
+        # Check if this sample uses scheduled sampling (Tasks 5 and 6)
+        use_scheduled_sampling = metadata.get("scheduled_sampling", False)
 
         prompt = self._make_prompt(text)
 
@@ -97,7 +172,7 @@ class PretrainDataset(Dataset):
             print("Sample prompt:\n", prompt[:500], "...")
 
         if self.mode == "train":
-            return self._prepare_training_set(prompt)
+            return self._prepare_training_set(prompt, use_scheduled_sampling, task_id, task_type_id)
         else:
             return self._prepare_eval_set(prompt)
 
@@ -112,7 +187,7 @@ class PretrainDataset(Dataset):
 
         return prompt.get_prompt()
 
-    def _prepare_training_set(self, prompt: str) -> Dict[str, torch.Tensor]:
+    def _prepare_training_set(self, prompt: str, use_scheduled_sampling: bool = False, task_id: int = -1, task_type_id: int = -1) -> Dict[str, torch.Tensor]:
         """Prepare a training sample."""
         truncated_padded_input = self._trunc_pad_input(prompt)
         attention_mask = self._create_attention_mask(truncated_padded_input)
@@ -122,12 +197,38 @@ class PretrainDataset(Dataset):
             f"Length mismatch: {len(truncated_padded_input)} != {len(attention_mask)} != {len(labels)} != {self.args.llm_input_len}"
         )
 
-        return {
+        result = {
             "elm_input_ids": torch.tensor(truncated_padded_input, dtype=torch.int64),
             "elm_labels": torch.tensor(labels, dtype=torch.int64),
             "elm_attention_mask": torch.tensor(attention_mask, dtype=torch.float32),
             "signal_id_indices": torch.tensor([-1], dtype=torch.int64),  # No signal placeholder
+            "use_scheduled_sampling": torch.tensor([use_scheduled_sampling], dtype=torch.bool),
+            "task_id": torch.tensor([task_id], dtype=torch.int64),  # For curriculum tracking
+            "task_type_id": torch.tensor([task_type_id], dtype=torch.int64),  # For sub-task tracking (20-23 for Task 2)
         }
+
+        # For scheduled sampling, find ECG token positions in the response
+        if use_scheduled_sampling:
+            ecg_positions = self._find_ecg_token_positions(truncated_padded_input, labels)
+            result["ecg_token_positions"] = torch.tensor(ecg_positions, dtype=torch.int64)
+        else:
+            result["ecg_token_positions"] = torch.tensor([-1], dtype=torch.int64)
+
+        return result
+
+    def _find_ecg_token_positions(self, input_ids: List[int], labels: List[int]) -> List[int]:
+        """
+        Find positions of ECG tokens that are part of the response (labels != -100).
+
+        Returns list of positions where scheduled sampling can replace ground truth
+        with model predictions.
+        """
+        positions = []
+        for i, (token_id, label) in enumerate(zip(input_ids, labels)):
+            # Only include ECG tokens that are in the response (label != -100)
+            if label != -100 and token_id in self.ecg_token_ids:
+                positions.append(i)
+        return positions if positions else [-1]
 
     def _prepare_eval_set(self, prompt: str) -> Dict[str, torch.Tensor]:
         """Prepare an evaluation sample."""
@@ -215,7 +316,7 @@ def build_pretrain_dataloader(
     llm_tokenizer_components: Dict,
     args,
     batch_size: int = 1,
-    shuffle: bool = True,
+    shuffle: bool = None,
     num_workers: int = 0,
 ) -> torch.utils.data.DataLoader:
     """
@@ -227,7 +328,7 @@ def build_pretrain_dataloader(
         llm_tokenizer_components: Dict with "llm_tokenizer" key
         args: Training arguments
         batch_size: Batch size
-        shuffle: Whether to shuffle
+        shuffle: Whether to shuffle (None = auto based on curriculum mode)
         num_workers: Number of worker processes
 
     Returns:
@@ -235,10 +336,17 @@ def build_pretrain_dataloader(
     """
     dataset = PretrainDataset(data_path, mode, llm_tokenizer_components, args)
 
+    # Determine shuffle based on curriculum mode if not explicitly set
+    if shuffle is None:
+        use_curriculum = getattr(args, "curriculum", True) and not getattr(args, "no_curriculum", False)
+        shuffle = (mode == "train") and not use_curriculum
+    elif mode != "train":
+        shuffle = False
+
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle if mode == "train" else False,
+        shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=True,
     )

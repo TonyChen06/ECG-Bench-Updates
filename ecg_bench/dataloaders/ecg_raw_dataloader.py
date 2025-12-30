@@ -24,22 +24,24 @@ class ECGRawDataset(BaseECGDataset):
     def __init__(self, data, mode, llm_tokenizer_components, args):
         super().__init__(data, mode, args)
         self.llm_tokenizer = llm_tokenizer_components["llm_tokenizer"]
-        self.build_ecg_raw_vocab()
+        self.build_ecg_token_id_set()
 
-    def build_ecg_raw_vocab(self):
-        """Add ECG raw tokens to the tokenizer vocabulary."""
-        new_vocab = [f"{ECG_RAW_TOKEN_PREFIX}{i}" for i in range(ECG_RAW_NUM_BINS)]
-        if self.args.dev and is_main():
-            print(f"Adding {len(new_vocab)} ECG raw tokens to vocabulary")
-        self.llm_tokenizer.add_tokens(new_vocab)
-        self.ecg_token_ids = set(self.llm_tokenizer.convert_tokens_to_ids(new_vocab))
+    def build_ecg_token_id_set(self):
+        """Build set of ECG token IDs for quick lookup.
 
-    def ecg_to_tokens(self, ecg_signal: np.ndarray) -> list[int]:
+        Note: ECG tokens are already added to the tokenizer in build_dataloader.py
+        before model building, so we just need to get their IDs here.
+        """
+        ecg_tokens = [f"{ECG_RAW_TOKEN_PREFIX}{i}" for i in range(ECG_RAW_NUM_BINS)]
+        self.ecg_token_ids = set(self.llm_tokenizer.convert_tokens_to_ids(ecg_tokens))
+
+    def ecg_to_tokens(self, ecg_signal: np.ndarray, max_samples: int = 500) -> list[int]:
         """
         Convert ECG signal to discrete token IDs.
 
         Args:
             ecg_signal: ECG signal array of shape (num_samples, num_leads) or (num_leads, num_samples)
+            max_samples: Maximum number of samples per lead (default 500, resulting in 2000 tokens for 4 leads)
 
         Returns:
             List of token IDs representing the binned ECG values
@@ -48,8 +50,11 @@ class ECGRawDataset(BaseECGDataset):
         if ecg_signal.shape[0] == 12:  # leads first
             ecg_signal = ecg_signal.T
 
+        # Truncate to max_samples to ensure consistent token count across all samples
+        ecg_signal = ecg_signal[:max_samples, :]
+
         # Select only the 4 leads we care about: II, aVR, V1, V4
-        selected_leads = ecg_signal[:, ECG_RAW_LEAD_INDICES]  # (num_samples, 4)
+        selected_leads = ecg_signal[:, ECG_RAW_LEAD_INDICES]  # (max_samples, 4)
 
         # Clamp values to [-3, 3] mV
         clamped = np.clip(selected_leads, ECG_RAW_MIN_VALUE, ECG_RAW_MAX_VALUE)

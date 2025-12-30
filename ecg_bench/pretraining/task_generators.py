@@ -2,13 +2,15 @@
 Task generators for pretraining.
 
 Generates various tasks to help the model understand ECG tokens:
-- Task 0: Token comparison (magnitude, sequence, halfway)
-- Task 1: Values to tokens (given values, output tokens)
-- Task 2: Tokens to values (given tokens, output values)
+- Task 0: Values to tokens (given values, output tokens) - explicit mapping
+- Task 1: Tokens to values (given tokens, output values) - reverse mapping
+- Task 2: Token comparison (magnitude, sequence, halfway) - implicit understanding
 - Task 3: Wave classification and property extraction (multi-turn)
 - Task 4: Wave transformation (frequency/amplitude changes)
 - Task 5: Wave reconstruction from specification (chunked)
 - Task 6: ECG reconstruction from real MIMIC data
+- Task 7: Long-range wave prediction
+- Task 8: Long-range ECG prediction
 """
 
 import numpy as np
@@ -49,7 +51,75 @@ class Task:
 
 
 # =============================================================================
-# Task 0: Token Comparison Questions
+# Task 0: Values to Tokens (explicit mapping - easy)
+# =============================================================================
+
+def generate_values_to_tokens_task(num_values: int = 50) -> Task:
+    """
+    Generate a task where given values, the model outputs tokens.
+    """
+    # Generate random values
+    values = np.random.uniform(-2.5, 2.5, num_values)
+    values = np.round(values, 2)  # Round for cleaner display
+
+    tokens = values_to_tokens(values)
+
+    values_str = format_values_list(values)
+    tokens_str = tokens_to_string(tokens)
+
+    turns = [
+        ConversationTurn("human", f"Convert these values (in mV) to their corresponding timeseries tokens:\n{values_str}"),
+        ConversationTurn("assistant", f"{tokens_str}"),
+    ]
+
+    return Task(
+        task_type="values_to_tokens",
+        turns=turns,
+        metadata={"values": values.tolist(), "tokens": tokens, "num_values": num_values}
+    )
+
+
+def generate_task_0(num_values: int = 50) -> Task:
+    """Generate Task 0 (values to tokens)."""
+    return generate_values_to_tokens_task(num_values)
+
+
+# =============================================================================
+# Task 1: Tokens to Values (reverse mapping - medium)
+# =============================================================================
+
+def generate_tokens_to_values_task(num_tokens: int = 20) -> Task:
+    """
+    Generate a task where given tokens, the model outputs values.
+    Fewer tokens than Task 0 since this is harder.
+    """
+    # Generate random bin indices
+    bin_indices = np.random.randint(0, 600, num_tokens)
+    tokens = [f"ecg_{idx}" for idx in bin_indices]
+    values = tokens_to_values(tokens)
+
+    tokens_str = tokens_to_string(tokens)
+    values_str = format_values_list(values)
+
+    turns = [
+        ConversationTurn("human", f"What values (in mV) do these timeseries tokens represent?\n{tokens_str}"),
+        ConversationTurn("assistant", f"{values_str}"),
+    ]
+
+    return Task(
+        task_type="tokens_to_values",
+        turns=turns,
+        metadata={"tokens": tokens, "values": values.tolist(), "num_tokens": num_tokens}
+    )
+
+
+def generate_task_1(num_tokens: int = 20) -> Task:
+    """Generate Task 1 (tokens to values)."""
+    return generate_tokens_to_values_task(num_tokens)
+
+
+# =============================================================================
+# Task 2: Token Comparison Questions (implicit understanding - harder)
 # =============================================================================
 
 def generate_magnitude_comparison_task() -> Task:
@@ -89,23 +159,38 @@ def generate_magnitude_comparison_task() -> Task:
 
 def generate_sequence_next_token_task() -> Task:
     """
-    Generate a task asking which token comes directly after another.
+    Generate a task asking which token comes directly after another in an arithmetic sequence.
+
+    Uses deterministic arithmetic sequences (linear progression) so the answer
+    is uniquely determined by the pattern. E.g., ecg_100 ecg_120 ecg_140 ecg_160 → ecg_180
+
+    Step sizes are limited to "round" numbers (multiples of 5 or 10) to make
+    the arithmetic more learnable for the model.
     """
-    # Generate a sequence of values (like from a wave)
-    duration = 0.1  # 25 samples
-    params = random_wave_params(frequency_range=(1.0, 5.0))
-    _, wave = generate_wave(duration, params)
-    wave = clamp_wave(wave)
+    # Use round step sizes that are easier to learn
+    # Instead of arbitrary [-30, 30], use multiples of 5 or 10
+    round_steps = [-20, -15, -10, -5, 5, 10, 15, 20]
+    step = random.choice(round_steps)
 
-    # Pick a random position (not the last)
-    pos = np.random.randint(0, len(wave) - 1)
-    current_token = value_to_token(wave[pos])
-    next_token = value_to_token(wave[pos + 1])
+    # Determine valid start range based on step direction
+    # Need 5 tokens in sequence, so start + 4*step must be in [0, 599]
+    if step > 0:
+        min_start = 0
+        max_start = 599 - 4 * step
+    else:
+        min_start = -4 * step
+        max_start = 599
 
-    # Show a few tokens for context
-    context_start = max(0, pos - 3)
-    context_tokens = values_to_tokens(wave[context_start:pos + 1])
-    context_str = tokens_to_string(context_tokens)
+    start = random.randint(min_start, max_start)
+
+    # Generate 5 token indices (4 for context, 1 for answer)
+    token_indices = [start + i * step for i in range(5)]
+
+    # Convert to token strings
+    context_tokens = [f"ecg_{idx}" for idx in token_indices[:4]]
+    next_token = f"ecg_{token_indices[4]}"
+    current_token = context_tokens[-1]
+    context_str = " ".join(context_tokens)
 
     turns = [
         ConversationTurn("human", f"Given this sequence of timeseries tokens: {context_str}\nWhat token comes directly after {current_token} in this sequence?"),
@@ -115,7 +200,7 @@ def generate_sequence_next_token_task() -> Task:
     return Task(
         task_type="sequence_next",
         turns=turns,
-        metadata={"context": context_str, "current": current_token, "next": next_token}
+        metadata={"context": context_str, "current": current_token, "next": next_token, "step": step}
     )
 
 
@@ -183,8 +268,8 @@ def generate_token_value_comparison_task() -> Task:
     )
 
 
-def generate_task_0() -> Task:
-    """Generate a random Task 0 (token comparison)."""
+def generate_task_2() -> Task:
+    """Generate Task 2 (all token comparison sub-tasks - for backward compatibility)."""
     generators = [
         generate_magnitude_comparison_task,
         generate_sequence_next_token_task,
@@ -194,72 +279,32 @@ def generate_task_0() -> Task:
     return random.choice(generators)()
 
 
-# =============================================================================
-# Task 1: Values to Tokens
-# =============================================================================
-
-def generate_values_to_tokens_task(num_values: int = 50) -> Task:
+def generate_task_1_comparison() -> Task:
     """
-    Generate a task where given values, the model outputs tokens.
+    Generate Stage 1 task: magnitude_comparison or value_comparison.
+
+    These are simpler comparison tasks that only require understanding
+    which token index is higher/lower (no arithmetic required).
     """
-    # Generate random values
-    values = np.random.uniform(-2.5, 2.5, num_values)
-    values = np.round(values, 2)  # Round for cleaner display
-
-    tokens = values_to_tokens(values)
-
-    values_str = format_values_list(values)
-    tokens_str = tokens_to_string(tokens)
-
-    turns = [
-        ConversationTurn("human", f"Convert these values (in mV) to their corresponding timeseries tokens:\n{values_str}"),
-        ConversationTurn("assistant", f"{tokens_str}"),
+    generators = [
+        generate_magnitude_comparison_task,
+        generate_token_value_comparison_task,
     ]
-
-    return Task(
-        task_type="values_to_tokens",
-        turns=turns,
-        metadata={"values": values.tolist(), "tokens": tokens, "num_values": num_values}
-    )
+    return random.choice(generators)()
 
 
-def generate_task_1(num_values: int = 50) -> Task:
-    """Generate Task 1 (values to tokens)."""
-    return generate_values_to_tokens_task(num_values)
-
-
-# =============================================================================
-# Task 2: Tokens to Values
-# =============================================================================
-
-def generate_tokens_to_values_task(num_tokens: int = 20) -> Task:
+def generate_task_2_arithmetic() -> Task:
     """
-    Generate a task where given tokens, the model outputs values.
-    Fewer tokens than Task 1 since this is harder.
+    Generate Stage 2 task: sequence_next or halfway_token.
+
+    These are harder tasks that require arithmetic operations
+    on token indices.
     """
-    # Generate random bin indices
-    bin_indices = np.random.randint(0, 600, num_tokens)
-    tokens = [f"ecg_{idx}" for idx in bin_indices]
-    values = tokens_to_values(tokens)
-
-    tokens_str = tokens_to_string(tokens)
-    values_str = format_values_list(values)
-
-    turns = [
-        ConversationTurn("human", f"What values (in mV) do these timeseries tokens represent?\n{tokens_str}"),
-        ConversationTurn("assistant", f"{values_str}"),
+    generators = [
+        generate_sequence_next_token_task,
+        generate_halfway_token_task,
     ]
-
-    return Task(
-        task_type="tokens_to_values",
-        turns=turns,
-        metadata={"tokens": tokens, "values": values.tolist(), "num_tokens": num_tokens}
-    )
-
-
-def generate_task_2(num_tokens: int = 20) -> Task:
-    """Generate Task 2 (tokens to values)."""
-    return generate_tokens_to_values_task(num_tokens)
+    return random.choice(generators)()
 
 
 # =============================================================================
@@ -276,12 +321,19 @@ def generate_wave_classification_task(duration: float = 2.0) -> Task:
         WaveType.SAWTOOTH, WaveType.SQUARE, WaveType.PULSE,
     ])
 
-    # Cap amplitude at 3.0 to stay within [-3, 3] mV range without clamping
-    params = random_wave_params(
+    # Generate random params with values rounded to 1 decimal place for learnability
+    amplitude = round(np.random.uniform(0.8, 3.0), 1)
+    frequency = round(np.random.uniform(1.0, 5.0), 1)
+    duty_cycle = round(np.random.uniform(0.1, 0.9), 1)
+
+    params = WaveParams(
         wave_type=wave_type,
-        amplitude_range=(0.8, 3.0),
-        frequency_range=(1.0, 5.0),
-        allow_offset=False,  # Keep it simpler for classification
+        amplitude=amplitude,
+        frequency=frequency,
+        phase=np.random.uniform(0, 2 * np.pi),
+        offset=0.0,  # Keep it simpler for classification
+        duty_cycle=duty_cycle,
+        decay_rate=np.random.uniform(0.5, 3.0),
     )
 
     _, wave = generate_wave(duration, params)
@@ -291,26 +343,37 @@ def generate_wave_classification_task(duration: float = 2.0) -> Task:
     wave_name = wave_type_description(wave_type)
     properties = get_wave_properties_for_type(wave_type)
 
+    # Map wave type to single-word answer (no "wave" suffix)
+    wave_type_names = {
+        WaveType.SINE: "sine",
+        WaveType.COSINE: "cosine",
+        WaveType.TRIANGLE: "triangle",
+        WaveType.SAWTOOTH: "sawtooth",
+        WaveType.SQUARE: "square",
+        WaveType.PULSE: "pulse",
+    }
+    wave_name_short = wave_type_names[wave_type]
+
     turns = []
 
-    # Turn 1: Classification
+    # Turn 1: Classification - answer is just the type (e.g., "sine")
     turns.append(ConversationTurn("human", f"Analyze this timeseries signal and identify what type of wave it is:\n{tokens_str}"))
-    turns.append(ConversationTurn("assistant", f"This is a {wave_name}."))
+    turns.append(ConversationTurn("assistant", wave_name_short))
 
-    # Turn 2: Amplitude
+    # Turn 2: Amplitude - answer is just the number (e.g., "2.5")
     if "amplitude" in properties:
-        turns.append(ConversationTurn("human", "What is the amplitude of this wave?"))
-        turns.append(ConversationTurn("assistant", f"The amplitude is approximately {format_value(params.amplitude)} mV."))
+        turns.append(ConversationTurn("human", "What is the amplitude of this wave in mV?"))
+        turns.append(ConversationTurn("assistant", f"{format_value(params.amplitude, precision=1)}"))
 
-    # Turn 3: Frequency
+    # Turn 3: Frequency - answer is just the number (e.g., "3.0")
     if "frequency" in properties:
-        turns.append(ConversationTurn("human", "What is the frequency of this wave?"))
-        turns.append(ConversationTurn("assistant", f"The frequency is approximately {format_value(params.frequency)} Hz."))
+        turns.append(ConversationTurn("human", "What is the frequency of this wave in Hz?"))
+        turns.append(ConversationTurn("assistant", f"{format_value(params.frequency, precision=1)}"))
 
-    # Turn 4: Additional property based on wave type
+    # Turn 4: Additional property based on wave type - answer is just the number (e.g., "50")
     if wave_type in [WaveType.SQUARE, WaveType.PULSE] and "duty_cycle" in dir(params):
-        turns.append(ConversationTurn("human", "What is the duty cycle of this wave?"))
-        turns.append(ConversationTurn("assistant", f"The duty cycle is approximately {format_value(params.duty_cycle * 100)}%."))
+        turns.append(ConversationTurn("human", "What is the duty cycle of this wave as a percentage?"))
+        turns.append(ConversationTurn("assistant", f"{int(params.duty_cycle * 100)}"))
 
     return Task(
         task_type="wave_classification",
@@ -461,16 +524,17 @@ def generate_task_4(duration: float = 1.0) -> Task:
 
 
 # =============================================================================
-# Task 5: Wave Reconstruction (Chunked)
+# Task 5: Wave Generation (Scheduled Sampling)
 # =============================================================================
 
-def generate_wave_reconstruction_task(
+def generate_wave_generation_task(
     duration: float = 2.0,
-    chunk_size: int = 100,
 ) -> Task:
     """
-    Generate a task where the model reconstructs a wave from specification.
-    The wave is generated in chunks to prevent cheating.
+    Generate a task where the model generates a complete wave from specification.
+
+    This task uses scheduled sampling during training - the model must generate
+    the full sequence and may use its own predictions as input during training.
     """
     wave_type = random.choice([
         WaveType.SINE, WaveType.COSINE, WaveType.TRIANGLE,
@@ -492,46 +556,36 @@ def generate_wave_reconstruction_task(
     _, wave = generate_wave(duration, params)
     total_samples = len(wave)
 
-    turns = []
+    # Convert wave to tokens
+    wave_tokens = values_to_tokens(wave)
+    wave_str = tokens_to_string(wave_tokens)
 
-    # Initial specification
+    # Specification prompt
     spec = f"{wave_type_description(wave_type)} with amplitude {amplitude} mV and frequency {frequency} Hz"
-    turns.append(ConversationTurn("human", f"Generate a {spec} sampled at 250 Hz for {duration} seconds. Output the timeseries tokens in chunks. Start with tokens 1-{chunk_size}."))
 
-    # Generate chunks
-    num_chunks = (total_samples + chunk_size - 1) // chunk_size
-
-    for i in range(num_chunks):
-        start_idx = i * chunk_size
-        end_idx = min((i + 1) * chunk_size, total_samples)
-        chunk_tokens = values_to_tokens(wave[start_idx:end_idx])
-        chunk_str = tokens_to_string(chunk_tokens)
-
-        turns.append(ConversationTurn("assistant", f"{chunk_str}"))
-
-        if end_idx < total_samples:
-            next_start = end_idx + 1
-            next_end = min(end_idx + chunk_size, total_samples)
-            turns.append(ConversationTurn("human", f"Continue with tokens {next_start}-{next_end}."))
+    turns = [
+        ConversationTurn("human", f"Generate a {spec} sampled at 250 Hz for {duration} seconds."),
+        ConversationTurn("assistant", wave_str),
+    ]
 
     return Task(
-        task_type="wave_reconstruction",
+        task_type="wave_generation",
         turns=turns,
         metadata={
             "wave_type": wave_type.value,
             "amplitude": amplitude,
             "frequency": frequency,
             "duration": duration,
-            "chunk_size": chunk_size,
             "total_samples": total_samples,
-            "num_chunks": num_chunks,
+            "scheduled_sampling": True,  # Flag for training loop
         }
     )
 
 
 def generate_task_5(duration: float = 2.0, chunk_size: int = 100) -> Task:
-    """Generate Task 5 (wave reconstruction from specification)."""
-    return generate_wave_reconstruction_task(duration, chunk_size)
+    """Generate Task 5 (wave generation with scheduled sampling)."""
+    # chunk_size is kept for API compatibility but not used
+    return generate_wave_generation_task(duration)
 
 
 # =============================================================================
@@ -584,22 +638,24 @@ def extract_lead_signal(ecg_signal: np.ndarray, lead_idx: int) -> np.ndarray:
             return ecg_signal[:, lead_idx]
 
 
-def generate_real_ecg_reconstruction_task(
-    chunk_size: int = 100,
+def generate_real_ecg_generation_task(
     max_samples: int = 500,  # Limit samples to keep task reasonable (500 samples = 2 seconds at 250 Hz)
+    partition: str = "task6",  # Use task6 partition to avoid overlap with task8
 ) -> Task:
     """
     Generate a task where the model outputs ECG tokens from real MIMIC data.
 
     Uses one of the 4 leads (II, aVR, V1, V4) from a real ECG recording.
     Includes the diagnostic report in the prompt.
+
+    This task uses scheduled sampling during training.
     """
     loader = get_ecg_loader()
 
     # Try to get a valid ECG with a non-empty report
     max_attempts = 20
     for _ in range(max_attempts):
-        ecg_signal, metadata = loader.get_random_ecg()
+        ecg_signal, metadata = loader.get_random_ecg(partition=partition)
         if ecg_signal is not None and metadata.get("report", "").strip():
             break
     else:
@@ -627,31 +683,20 @@ def generate_real_ecg_reconstruction_task(
     total_samples = len(lead_signal)
     duration = total_samples / SAMPLING_RATE
 
-    turns = []
+    # Convert to tokens
+    ecg_tokens = values_to_tokens(lead_signal)
+    ecg_str = tokens_to_string(ecg_tokens)
 
-    # Initial prompt - includes diagnosis and asks for ECG tokens
-    prompt = f"Generate the {lead_name} lead ECG signal for a patient with the following diagnosis: {report}\n\nOutput the timeseries tokens sampled at 250 Hz for {format_value(duration)} seconds. Output in chunks. Start with tokens 1-{min(chunk_size, total_samples)}."
+    # Prompt with diagnosis
+    prompt = f"Generate the {lead_name} lead ECG signal for a patient with the following diagnosis: {report}\n\nOutput the timeseries tokens sampled at 250 Hz for {format_value(duration)} seconds."
 
-    turns.append(ConversationTurn("human", prompt))
-
-    # Generate chunks
-    num_chunks = (total_samples + chunk_size - 1) // chunk_size
-
-    for i in range(num_chunks):
-        start_idx = i * chunk_size
-        end_idx = min((i + 1) * chunk_size, total_samples)
-        chunk_tokens = values_to_tokens(lead_signal[start_idx:end_idx])
-        chunk_str = tokens_to_string(chunk_tokens)
-
-        turns.append(ConversationTurn("assistant", f"{chunk_str}"))
-
-        if end_idx < total_samples:
-            next_start = end_idx + 1
-            next_end = min(end_idx + chunk_size, total_samples)
-            turns.append(ConversationTurn("human", f"Continue with tokens {next_start}-{next_end}."))
+    turns = [
+        ConversationTurn("human", prompt),
+        ConversationTurn("assistant", ecg_str),
+    ]
 
     return Task(
-        task_type="ecg_reconstruction",
+        task_type="ecg_generation",
         turns=turns,
         metadata={
             "source": "mimic-iv-ecg",
@@ -660,16 +705,228 @@ def generate_real_ecg_reconstruction_task(
             "lead": lead_name,
             "lead_idx": lead_idx,
             "duration": duration,
-            "chunk_size": chunk_size,
             "total_samples": total_samples,
-            "num_chunks": num_chunks,
+            "scheduled_sampling": True,  # Flag for training loop
         }
     )
 
 
 def generate_task_6(chunk_size: int = 100) -> Task:
-    """Generate Task 6 (ECG reconstruction from real MIMIC data)."""
-    return generate_real_ecg_reconstruction_task(chunk_size=chunk_size)
+    """Generate Task 6 (ECG generation from real MIMIC data with scheduled sampling)."""
+    # chunk_size is kept for API compatibility but not used
+    return generate_real_ecg_generation_task(partition="task6")
+
+
+# =============================================================================
+# Task 7: Long-Range Wave Prediction
+# =============================================================================
+
+# Prediction offsets for long-range tasks (relative to context end)
+LONG_RANGE_OFFSETS = [10, 30, 60, 100, 150, 210, 280]
+
+
+def generate_long_range_wave_prediction_task(
+    context_tokens: int = 200,
+    duration: float = 3.0,  # Need longer signal to have tokens at far offsets
+) -> Task:
+    """
+    Generate a task testing long-range pattern understanding for synthetic waves.
+
+    Given ~200 tokens of a wave pattern, predict specific tokens far into the future:
+    tokens at offsets +10, +30, +60, +100, +150, +210, +280 from context end.
+
+    This tests whether the model understands the periodic structure well enough
+    to extrapolate far beyond the given context.
+    """
+    wave_type = random.choice([
+        WaveType.SINE, WaveType.COSINE, WaveType.TRIANGLE,
+        WaveType.SAWTOOTH, WaveType.SQUARE,
+    ])
+
+    # Cap amplitude at 3.0 to stay within [-3, 3] mV range
+    amplitude = round(np.random.uniform(0.8, 3.0), 2)
+    frequency = round(np.random.uniform(0.5, 2.0), 2)  # Lower freq for clearer patterns
+
+    params = WaveParams(
+        wave_type=wave_type,
+        amplitude=amplitude,
+        frequency=frequency,
+        phase=0,
+        offset=0,
+    )
+
+    _, wave = generate_wave(duration, params)
+    all_tokens = values_to_tokens(wave)
+
+    # We need enough tokens for context + max offset
+    min_required = context_tokens + max(LONG_RANGE_OFFSETS) + 1
+    if len(all_tokens) < min_required:
+        # Extend duration if needed
+        _, wave = generate_wave(duration * 2, params)
+        all_tokens = values_to_tokens(wave)
+
+    if len(all_tokens) < min_required:
+        raise RuntimeError(f"Not enough tokens generated: {len(all_tokens)} < {min_required}")
+
+    # Context tokens
+    context = all_tokens[:context_tokens]
+    context_str = tokens_to_string(context)
+
+    # Build the target tokens at specified offsets
+    target_tokens = []
+    target_positions = []
+    for offset in LONG_RANGE_OFFSETS:
+        pos = context_tokens + offset
+        if pos < len(all_tokens):
+            target_tokens.append(all_tokens[pos])
+            target_positions.append(pos + 1)  # 1-indexed for user
+
+    # Format answer as concatenated tokens (no spaces, matching other tasks)
+    answer = tokens_to_string(target_tokens)
+
+    # Format the question with positions
+    positions_str = ", ".join([str(p) for p in target_positions])
+
+    wave_name = wave_type_description(wave_type)
+    prompt = (
+        f"Here is a {wave_name} signal with amplitude {amplitude} mV and frequency {frequency} Hz:\n"
+        f"{context_str}\n\n"
+        f"Predict the tokens at positions {positions_str}."
+    )
+
+    turns = [
+        ConversationTurn("human", prompt),
+        ConversationTurn("assistant", answer),
+    ]
+
+    return Task(
+        task_type="long_range_wave_prediction",
+        turns=turns,
+        metadata={
+            "wave_type": wave_type.value,
+            "amplitude": amplitude,
+            "frequency": frequency,
+            "context_tokens": context_tokens,
+            "prediction_offsets": LONG_RANGE_OFFSETS,
+            "target_positions": target_positions,
+        }
+    )
+
+
+def generate_task_7(context_tokens: int = 200) -> Task:
+    """Generate Task 7 (long-range wave prediction)."""
+    return generate_long_range_wave_prediction_task(context_tokens=context_tokens)
+
+
+# =============================================================================
+# Task 8: Long-Range ECG Prediction
+# =============================================================================
+
+def generate_long_range_ecg_prediction_task(
+    context_tokens: int = 200,
+    min_signal_length: int = 500,  # Need at least this many samples
+) -> Task:
+    """
+    Generate a task testing long-range pattern understanding for real ECGs.
+
+    Given ~200 tokens of a real ECG pattern, predict specific tokens far into the future.
+    Uses ECGs from the task8 partition (separate from Task 6) to avoid data leakage.
+    """
+    loader = get_ecg_loader()
+
+    # Calculate minimum required samples
+    min_required = context_tokens + max(LONG_RANGE_OFFSETS) + 1
+
+    # Try to get a valid ECG with enough samples
+    max_attempts = 50
+    for _ in range(max_attempts):
+        ecg_signal, metadata = loader.get_random_ecg(partition="task8")
+        if ecg_signal is None:
+            continue
+
+        # Select a random lead
+        lead_idx_in_list = random.randint(0, len(ECG_RAW_LEAD_INDICES) - 1)
+        lead_idx = ECG_RAW_LEAD_INDICES[lead_idx_in_list]
+        lead_name = ECG_RAW_LEADS[lead_idx_in_list]
+
+        lead_signal = extract_lead_signal(ecg_signal, lead_idx)
+
+        if len(lead_signal) >= min_required:
+            break
+    else:
+        raise RuntimeError("Failed to load ECG with sufficient length after multiple attempts")
+
+    # Clamp signal to valid range
+    lead_signal = clamp_wave(lead_signal)
+
+    # Convert to tokens
+    all_tokens = values_to_tokens(lead_signal)
+
+    # Randomly select a starting point that allows for full context + predictions
+    max_start = len(all_tokens) - min_required
+    if max_start <= 0:
+        start_idx = 0
+    else:
+        start_idx = random.randint(0, max_start)
+
+    # Get context tokens
+    context = all_tokens[start_idx:start_idx + context_tokens]
+    context_str = tokens_to_string(context)
+
+    # Build the target tokens at specified offsets
+    target_tokens = []
+    target_positions = []
+    for offset in LONG_RANGE_OFFSETS:
+        pos = start_idx + context_tokens + offset
+        if pos < len(all_tokens):
+            target_tokens.append(all_tokens[pos])
+            target_positions.append(context_tokens + offset + 1)  # Relative 1-indexed
+
+    # Format answer as concatenated tokens (no spaces, matching other tasks)
+    answer = tokens_to_string(target_tokens)
+
+    # Format the question with positions
+    positions_str = ", ".join([str(p) for p in target_positions])
+
+    # Get diagnosis if available
+    report = metadata.get("report", "").strip()
+    if report:
+        prompt = (
+            f"Here is a {lead_name} lead ECG signal from a patient with: {report}\n\n"
+            f"{context_str}\n\n"
+            f"Predict the tokens at positions {positions_str}."
+        )
+    else:
+        prompt = (
+            f"Here is a {lead_name} lead ECG signal:\n"
+            f"{context_str}\n\n"
+            f"Predict the tokens at positions {positions_str}."
+        )
+
+    turns = [
+        ConversationTurn("human", prompt),
+        ConversationTurn("assistant", answer),
+    ]
+
+    return Task(
+        task_type="long_range_ecg_prediction",
+        turns=turns,
+        metadata={
+            "source": "mimic-iv-ecg",
+            "ecg_path": metadata.get("ecg_path", ""),
+            "report": report,
+            "lead": lead_name,
+            "lead_idx": lead_idx,
+            "context_tokens": context_tokens,
+            "prediction_offsets": LONG_RANGE_OFFSETS,
+            "target_positions": target_positions,
+        }
+    )
+
+
+def generate_task_8(context_tokens: int = 200) -> Task:
+    """Generate Task 8 (long-range ECG prediction from real MIMIC data)."""
+    return generate_long_range_ecg_prediction_task(context_tokens=context_tokens)
 
 
 # =============================================================================
@@ -683,11 +940,11 @@ def generate_random_task(
     Generate a random pretraining task.
 
     Args:
-        task_weights: Optional weights for each task type (0-6).
+        task_weights: Optional weights for each task type (0-8).
                      Default is uniform distribution.
     """
     if task_weights is None:
-        task_weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1}
+        task_weights = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1}
 
     task_types = list(task_weights.keys())
     weights = [task_weights[t] for t in task_types]
@@ -697,12 +954,14 @@ def generate_random_task(
 
     generators = {
         0: generate_task_0,
-        1: lambda: generate_task_1(num_values=50),
-        2: lambda: generate_task_2(num_tokens=20),
+        1: lambda: generate_task_1(num_tokens=50),
+        2: generate_task_2,
         3: lambda: generate_task_3(duration=2.0),
         4: lambda: generate_task_4(duration=1.0),
         5: lambda: generate_task_5(duration=2.0, chunk_size=100),
         6: lambda: generate_task_6(chunk_size=100),
+        7: lambda: generate_task_7(context_tokens=200),
+        8: lambda: generate_task_8(context_tokens=200),
     }
 
     return generators[task_type]()

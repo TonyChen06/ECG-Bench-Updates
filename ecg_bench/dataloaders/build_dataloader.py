@@ -6,7 +6,10 @@ import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from ecg_bench.configs.constants import HF_DATASETS, HF_CACHE_DIR, HF_LLMS, SIGNAL_TOKEN_PLACEHOLDER, ECG_ENCODERS, VISION_ENCODERS
+from ecg_bench.configs.constants import (
+    HF_DATASETS, HF_CACHE_DIR, HF_LLMS, SIGNAL_TOKEN_PLACEHOLDER,
+    ECG_ENCODERS, VISION_ENCODERS, ECG_RAW_TOKEN_PREFIX, ECG_RAW_NUM_BINS,
+)
 from ecg_bench.utils.gpu_setup import is_main, get_world_size, get_rank
 
 
@@ -83,7 +86,9 @@ class BuildDataLoader:
                 "truncated_padded_ecg_tokens": torch.tensor([], dtype=torch.int64),
             }
 
-        if self.args.encoder == "signal2vec":
+        # Pad variable-length fields for batching
+        # Applies to signal2vec (truncated_padded_ecg_tokens) and ecg_raw (signal_id_indices)
+        if self.args.encoder == "signal2vec" or self.args.ecg_raw:
             pad_id = -2
             pad_fields = ["truncated_padded_ecg_tokens", "signal_id_indices"]
             for field in pad_fields:
@@ -209,6 +214,14 @@ class BuildDataLoader:
             tokens_to_add["additional_special_tokens"].append(SIGNAL_TOKEN_PLACEHOLDER)
 
         llm_tokenizer.add_special_tokens(tokens_to_add)
+
+        # Add ECG raw tokens for ecg_raw mode (must be done before model building)
+        if self.args.ecg_raw:
+            ecg_tokens = [f"{ECG_RAW_TOKEN_PREFIX}{i}" for i in range(ECG_RAW_NUM_BINS)]
+            llm_tokenizer.add_tokens(ecg_tokens)
+            if is_main():
+                print(f"Added {len(ecg_tokens)} ECG raw tokens to tokenizer")
+
         return llm_tokenizer
 
     ### DEV FUNCTIONS ###
