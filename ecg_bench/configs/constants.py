@@ -238,6 +238,15 @@ VISION_ENCODERS_INPUT_MAPPING = {
 SIGNAL_TOKEN_PLACEHOLDER = "<signal>"
 ECG_TOKEN_PREFIX = "signal_"
 
+# ECG Raw Token Configuration
+# 600 tokens representing values from -3 to 3 mV (equally spaced bins)
+ECG_RAW_TOKEN_PREFIX = "ecg_"
+ECG_RAW_NUM_BINS = 600
+ECG_RAW_MIN_VALUE = -3.0  # mV
+ECG_RAW_MAX_VALUE = 3.0   # mV
+ECG_RAW_LEADS = ["II", "V4"]  # Lead names
+ECG_RAW_LEAD_INDICES = [1, 9]  # Standard 12-lead order: I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6
+
 # Encoders
 ECG_ENCODERS = {
     "signal2vec": {

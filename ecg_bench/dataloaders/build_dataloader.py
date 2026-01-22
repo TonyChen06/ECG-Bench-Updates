@@ -6,7 +6,10 @@ import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from ecg_bench.configs.constants import HF_DATASETS, HF_CACHE_DIR, HF_LLMS, SIGNAL_TOKEN_PLACEHOLDER, ECG_ENCODERS, VISION_ENCODERS
+from ecg_bench.configs.constants import (
+    HF_DATASETS, HF_CACHE_DIR, HF_LLMS, SIGNAL_TOKEN_PLACEHOLDER,
+    ECG_ENCODERS, VISION_ENCODERS, ECG_RAW_TOKEN_PREFIX, ECG_RAW_NUM_BINS,
+)
 from ecg_bench.utils.gpu_setup import is_main, get_world_size, get_rank
 
 
@@ -83,7 +86,9 @@ class BuildDataLoader:
                 "truncated_padded_ecg_tokens": torch.tensor([], dtype=torch.int64),
             }
 
-        if self.args.encoder == "signal2vec":
+        # Pad variable-length fields for batching
+        # Applies to signal2vec (truncated_padded_ecg_tokens) and ecg_raw (signal_id_indices)
+        if self.args.encoder == "signal2vec" or getattr(self.args, 'ecg_raw', False):
             pad_id = -2
             pad_fields = ["truncated_padded_ecg_tokens", "signal_id_indices"]
             for field in pad_fields:
@@ -118,6 +123,10 @@ class BuildDataLoader:
             from ecg_bench.dataloaders.ecg_stacked_signal_dataloader import ECGStackedSignalDataset
 
             torch_dataset = ECGStackedSignalDataset(self.data, self.mode, self.llm_tokenizer_components, self.encoder_tokenizer_components, self.args)
+        elif getattr(self.args, 'ecg_raw', False):
+            from ecg_bench.dataloaders.ecg_raw_dataloader import ECGRawDataset
+
+            torch_dataset = ECGRawDataset(self.data, self.mode, self.llm_tokenizer_components, self.args)
         else:
             raise ValueError("Please choose an input representation.")
         return torch_dataset
@@ -202,6 +211,14 @@ class BuildDataLoader:
             tokens_to_add["additional_special_tokens"].append(SIGNAL_TOKEN_PLACEHOLDER)
 
         llm_tokenizer.add_special_tokens(tokens_to_add)
+
+        # Add ECG raw tokens for ecg_raw mode (must be done before model building)
+        if getattr(self.args, 'ecg_raw', False):
+            ecg_tokens = [f"{ECG_RAW_TOKEN_PREFIX}{i}" for i in range(ECG_RAW_NUM_BINS)]
+            llm_tokenizer.add_tokens(ecg_tokens)
+            if is_main():
+                print(f"Added {len(ecg_tokens)} ECG raw tokens to tokenizer")
+
         return llm_tokenizer
 
     ### DEV FUNCTIONS ###
@@ -219,6 +236,8 @@ class BuildDataLoader:
     def assert_data_model_match(self):
         if self.args.ecg_token:
             assert self.args.encoder is None or self.args.encoder == "signal2vec", print("ecg_token mode should not specify encoder")
+        elif getattr(self.args, 'ecg_raw', False):
+            assert self.args.encoder is None, print("ecg_raw mode should not specify encoder")
         elif self.args.ecg_image or self.args.ecg_stacked_signal:
             assert self.args.encoder in VISION_ENCODERS, print(f"ecg_image/ecg_stacked_signal requires vision encoder, got {self.args.encoder}")
         elif self.args.ecg_signal:

@@ -20,6 +20,7 @@ def get_args(mode: Mode) -> argparse.Namespace:
             ("--ecg_signal", "Raw ECG Signal"),
             ("--ecg_stacked_signal", "Stacked ECG Signal"),
             ("--ecg_token", "ECG Tokens"),
+            ("--ecg_raw", "Raw ECG as discrete tokens (2 leads: II, V4)"),
             ("--augment_ecg_image", "Augment ECG Image"),
             ("--noise_ecg", "Apply ECG Perturbation"),
             ("--blackout_ecg", "Apply ECG Blackout"),
