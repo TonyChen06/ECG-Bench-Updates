@@ -12,9 +12,10 @@ def train(elm, dataloader, optimizer, epoch, args, checkpoint_manager=None):
     elm.train()
     total_loss = 0
     total_steps = 0
+    encoder_str = f" with {args.encoder}" if getattr(args, 'encoder', None) else ""
     progress = tqdm(
         dataloader,
-        desc=f"Training {args.llm} with {args.encoder}; Epoch {epoch}",
+        desc=f"Training {args.llm}{encoder_str}; Epoch {epoch}",
         disable=not show_progress,
         leave=False,
     )
@@ -29,6 +30,8 @@ def train(elm, dataloader, optimizer, epoch, args, checkpoint_manager=None):
         total_loss += loss.item()
         total_steps += 1
         loss.backward()
+        if getattr(args, "grad_clip", None):
+            torch.nn.utils.clip_grad_norm_(elm.parameters(), args.grad_clip)
         optimizer.step_and_update_lr()
         if getattr(args, "wandb", False) and is_main():
             wandb.log({"train/step_loss": loss.item(), "epoch": epoch})

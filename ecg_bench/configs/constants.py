@@ -3,7 +3,7 @@ import torch
 import re
 
 # Main arg MODE types
-Mode = Literal["train", "eval", "inference", "post_train", "ecg_tokenizer", "preprocess", "rag", "signal2vec"]
+Mode = Literal["train", "eval", "inference", "post_train", "ecg_tokenizer", "preprocess", "rag", "signal2vec", "pretrain"]
 
 # Directories
 RUNS_DIR = "./ecg_bench/runs"
@@ -178,6 +178,24 @@ HF_LLMS = {
                 106: "<start_of_turn>",
                 2516: "model",
             },
+        },
+    },
+    "smollm-135m": {
+        "model": "HuggingFaceTB/SmolLM-135M",
+        "tokenizer": "HuggingFaceTB/SmolLM-135M",
+        "chat_template": None,  # Base model, no chat template
+        "native_dtype": torch.bfloat16,
+        "tokens_to_add": {
+            "additional_special_tokens": [],
+        },
+        "output_hidden_states": False,
+        "find_unused_parameters": False,
+        "model_hidden_size": None,
+        "system_prompt": False,
+        "role": None,
+        "watch_tokens": {
+            "bos_token": {0: "<|endoftext|>"},
+            "eos_token": {0: "<|endoftext|>"},
         },
     },
 }

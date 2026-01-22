@@ -37,14 +37,37 @@ class BuildLLM:
     ):
         hf_llm = self.build_hf_llm()
         HF_LLMS[self.args.llm]["model_hidden_size"] = hf_llm.config.hidden_size
-        HF_LLMS[self.args.llm]["output_hidden_states"] = self.args.output_hidden_states
+        HF_LLMS[self.args.llm]["output_hidden_states"] = getattr(self.args, 'output_hidden_states', False)
         assert HF_LLMS[self.args.llm]["model_hidden_size"] is not None, print("model_hidden_size")
         hf_llm = self.resize_and_report_embeddings(hf_llm)
+
+        # Reset weights if requested (for pretraining from scratch)
+        if getattr(self.args, 'reset_weights', False):
+            hf_llm = self.reset_model_weights(hf_llm)
+
         if self.args.peft:
             hf_llm = self.build_peft(
                 hf_llm,
             )
         return hf_llm
+
+    def reset_model_weights(self, model):
+        """Reset all model weights to random initialization."""
+        if is_main():
+            print(f"[{self.args.llm}] Resetting model weights to random initialization...")
+
+        def init_weights(module):
+            if hasattr(module, 'reset_parameters'):
+                module.reset_parameters()
+            elif hasattr(module, '_init_weights'):
+                module._init_weights(module)
+
+        model.apply(init_weights)
+
+        if is_main():
+            print(f"[{self.args.llm}] Model weights reset complete.")
+
+        return model
 
     ### HF LLM FUNCTIONS ###
     def build_hf_llm(

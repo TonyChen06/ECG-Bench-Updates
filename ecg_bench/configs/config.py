@@ -3,7 +3,7 @@ from ecg_bench.configs.constants import Mode
 
 
 def get_args(mode: Mode) -> argparse.Namespace:
-    if mode not in {"train", "eval", "inference", "post_train", "ecg_tokenizer", "preprocess", "rag", "signal2vec"}:
+    if mode not in {"train", "eval", "inference", "post_train", "ecg_tokenizer", "preprocess", "rag", "signal2vec", "pretrain"}:
         raise ValueError(f"invalid mode: {mode}")
 
     parser = argparse.ArgumentParser(description=None)
@@ -73,6 +73,7 @@ def get_args(mode: Mode) -> argparse.Namespace:
         parser.add_argument("--warmup", type=int, default=500, help="Warmup steps")
         parser.add_argument("--ref_global_bs", type=int, default=None)
         parser.add_argument("--grad_accum_steps", type=int, default=1)
+        parser.add_argument("--grad_clip", type=float, default=None, help="Gradient clipping max norm")
         parser.add_argument("--scale_wd", type=str, default="none", choices=["none", "inv_sqrt", "inv_linear"])
         parser.add_argument("--llm_input_len", type=int, default=1024, help="LLM Input Sequence Length")
         parser.add_argument("--min_ecg_tokens_len", type=int, default=250, help="Minimum ECG token length to consider")
@@ -112,5 +113,37 @@ def get_args(mode: Mode) -> argparse.Namespace:
 
     if mode == "rag":
         parser.add_argument("--rag_data", type=str, default=None, help="Path to the data for RAG database creation")
+
+    if mode == "pretrain":
+        parser.add_argument("--llm", type=str, default=None, help="Large Language Model")
+        parser.add_argument("--pretrain_corpus", type=str, default=None, help="Path to pretrain corpus directory")
+        parser.add_argument("--seq_len", type=int, default=2048, help="Sequence length for pretraining")
+        parser.add_argument("--reset_weights", action="store_true", default=False, help="Reset model weights to random initialization")
+        parser.add_argument("--ecg_data", type=str, default=None, help="ECG QA dataset to inject (e.g., ecg-qa-ptbxl-250-1250)")
+        parser.add_argument("--ecg_num_examples", type=int, default=None, help="Number of ECG examples to inject into pretraining")
+        parser.add_argument("--ecg_raw", action="store_true", default=False, help="Include ECG signal as discrete tokens (2 leads: II, V4)")
+        parser.add_argument("--attention_type", type=str, default="sdpa", help="Attention Type")
+        parser.add_argument("--peft", action="store_true", default=None, help="Use PEFT")
+        parser.add_argument("--lora_rank", type=int, default=16, help="LoRA rank")
+        parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha")
+        parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout")
+        parser.add_argument("--optimizer", type=str, default="adamw", choices=["adam", "adamw"], help="Optimizer type")
+        parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+        parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+        parser.add_argument("--epochs", type=int, default=1, help="Number of epochs")
+        parser.add_argument("--weight_decay", type=float, default=1e-2, help="Weight decay")
+        parser.add_argument("--patience", type=int, default=5, help="Patience for early stopping")
+        parser.add_argument("--patience_delta", type=float, default=0.1, help="Delta for early stopping")
+        parser.add_argument("--beta1", type=float, default=0.9, help="Beta1 for optimizer")
+        parser.add_argument("--beta2", type=float, default=0.99, help="Beta2 for optimizer")
+        parser.add_argument("--eps", type=float, default=1e-8, help="Epsilon for optimizer")
+        parser.add_argument("--warmup", type=int, default=500, help="Warmup steps")
+        parser.add_argument("--ref_global_bs", type=int, default=None)
+        parser.add_argument("--grad_accum_steps", type=int, default=1)
+        parser.add_argument("--grad_clip", type=float, default=None, help="Gradient clipping max norm")
+        parser.add_argument("--scale_wd", type=str, default="none", choices=["none", "inv_sqrt", "inv_linear"])
+        parser.add_argument("--wandb", action="store_true", default=None, help="Enable logging")
+        parser.add_argument("--device", type=str, default=None, help="Device (cuda/cpu)")
+        parser.add_argument("--distributed", action="store_true", default=None, help="Enable distributed training")
 
     return parser.parse_args()
